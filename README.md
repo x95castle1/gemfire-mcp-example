@@ -31,7 +31,7 @@ The MCP server is **read-only**: its 11 tools observe the cluster and never chan
 |---|---|---|---|
 | 0 | Prerequisites & skeleton | have the artifacts and know the version matrix | [docs/00](docs/00-prerequisites.md) |
 | 1 | GemFire cluster | `curl localhost:17070/management/v1/ping` → `pong` | [docs/01](docs/01-cluster.md) |
-| 2 | MCP server (live state) | call `list_members` with raw JSON-RPC via curl | |
+| 2 | MCP server (live state) | call `list_members` with raw JSON-RPC via curl | [docs/02](docs/02-mcp-server.md) |
 | 3 | Off-the-shelf clients | browse tools in MCP Inspector, ask Claude Code about the cluster | |
 | 4 | Telemetry pipeline (file store) | query stats history and search logs | |
 | 5 | Workload generator | watch `cache_ops_rate` / `put_latency` move | |
@@ -44,8 +44,12 @@ The MCP server is **read-only**: its 11 tools observe the cluster and never chan
 ## Quickstart
 
 ```bash
-cp .env.example .env        # then edit passwords
-# put the two vendor artifacts in ./vendor (see vendor/README.md)
-docker compose up -d        # chunk 1: the cluster
-curl localhost:17070/management/v1/ping
+make                       # list the targets
+make start                 # cluster + MCP server (about 20s from scratch)
+make status                # containers + health
+make tools                 # MCP tools/list via raw JSON-RPC
+make call T=list_members   # call a tool
+make stop                  # stop (keeps ./data)      make clean  # stop + wipe ./data
 ```
+
+For everything else, use `scripts/mcp-curl.sh` (see [docs/02](docs/02-mcp-server.md)) or `docker compose` directly.

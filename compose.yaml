@@ -132,6 +132,51 @@ services:
       server-3: { condition: service_healthy }
     command: gfsh run --file=/config/init-cluster.gfsh
 
+  # ── Chunk 2: the GemFire MCP server ──────────────────────────────────────────
+  # docker compose --profile mcp up -d --build
+  #
+  # Two data sources, two settings:
+  #   GF_MCP_GEMFIRE_URL  -> live state (list_members, list_regions, assess_cluster_health, ...)
+  #   GF_TELEMETRY_STORE  -> history (stats + logs). Required even while empty: the server checks it
+  #                          is reachable at startup; an empty store only logs a warning.
+  # Careful: an UNKNOWN GF_MCP_* variable (e.g. a typo) makes the server refuse to start.
+  mcp-server:
+    profiles: [mcp]
+    build:
+      context: .
+      dockerfile: docker/mcp-server/Dockerfile
+      args:
+        GF_MCP_VERSION: ${GF_MCP_VERSION:-1.0.0}
+    image: gfmcp/gemfire-mcp-server:${GF_MCP_VERSION:-1.0.0}
+    hostname: mcp-server
+    depends_on:
+      locator: { condition: service_healthy }
+    environment:
+      # Default is 127.0.0.1 (loopback), which inside a container means unreachable from outside.
+      SERVER_ADDRESS: 0.0.0.0
+      # The locator's Management REST API. The server appends /management/v1 itself.
+      GF_MCP_GEMFIRE_URL: http://locator:7070
+      # Shared with the telemetry forwarder (chunk 4). Empty for now, so history tools return nothing.
+      GF_TELEMETRY_STORE: file:///telemetry-store
+      # Front-door auth for MCP clients (mode=basic is the default). Both are required.
+      GF_MCP_AUTH_BASIC_USERNAME: ${GF_MCP_AUTH_BASIC_USERNAME:?set it in .env}
+      GF_MCP_AUTH_BASIC_PASSWORD: ${GF_MCP_AUTH_BASIC_PASSWORD:?set it in .env}
+      # Lab only: otherwise 50 bad logins lock out your laptop's IP for a few minutes.
+      GF_MCP_AUTH_FAILURE_LIMIT_ENABLED: "false"
+    ports:
+      - "8085:8085"
+    healthcheck:
+      # Any HTTP answer (even 401 without credentials) means Tomcat is up and serving /mcp
+      test: ["CMD", "curl", "-so", "/dev/null", "http://127.0.0.1:8085/mcp"]
+      interval: 3s
+      timeout: 3s
+      start_period: 30s
+      retries: 20
+    volumes:
+      # Read-only on purpose: the MCP server never writes to the store; only the forwarder does.
+      - ./data/telemetry-store:/telemetry-store:ro
+    networks: [gfmcp]
+
 networks:
   gfmcp:
     name: gfmcp

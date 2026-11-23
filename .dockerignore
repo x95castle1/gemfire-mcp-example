@@ -1,0 +1,10 @@
+# Keep the build context small: only ./vendor and ./docker are needed by our Dockerfiles
+.git
+.idea
+data
+docs
+scripts
+gemfire
+**/build
+**/.gradle
+.env
