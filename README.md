@@ -48,7 +48,8 @@ make                       # list the targets
 make start                 # cluster + MCP server (about 20s from scratch)
 make status                # containers + health
 make tools                 # MCP tools/list via raw JSON-RPC
-make call T=list_members   # call a tool
+make call                  # pick a tool + its arguments from a menu (fzf), then call it
+make call T=list_members   # or call one directly
 make stop                  # stop (keeps ./data)      make clean  # stop + wipe ./data
 ```
 

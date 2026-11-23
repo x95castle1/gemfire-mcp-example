@@ -6,6 +6,7 @@
 #   scripts/mcp-curl.sh tools                         # tools/list  -> name + first line of description
 #   scripts/mcp-curl.sh tool <name>                   # tools/list  -> one tool's full definition (inputSchema!)
 #   scripts/mcp-curl.sh call <tool> ['<json args>']   # tools/call
+#   scripts/mcp-curl.sh pick                          # fzf menu: pick a tool, fill args from its inputSchema, call it
 #   scripts/mcp-curl.sh resources                     # resources/list
 #   scripts/mcp-curl.sh read <uri>                    # resources/read, e.g. gemfire://stat-signals
 #
@@ -114,7 +115,81 @@ show_tool_result() {
   return 0
 }
 
+# ── pick: interactive tools/call built from the tool's own inputSchema (needs fzf) ──
+# This is roughly what an AI client does: read the schema, then produce arguments that fit it.
+# The difference is that here YOU are the model.
+
+# fzf preview of one tool: what the LLM reads when deciding whether and how to call it
+cat >"$TMP/preview.jq" <<'JQ'
+.result.tools[] | select(.name == $n) |
+"\(.title // .name)\n\n\(.description)\n\nArguments (* = required):",
+( (.inputSchema.required // []) as $req | (.inputSchema.properties // {}) | to_entries[] | . as $e |
+  "  \(if ($req | index($e.key)) then "*" else " " end) \($e.key)  (\($e.value.type)\(if $e.value.items then " of \($e.value.items.type)" else "" end))" +
+  (if $e.value.enum then "\n      one of: \($e.value.enum | join(" | "))" else "" end) +
+  "\n      \($e.value.description // "")" )
+JQ
+
+# fzf preview of one argument
+cat >"$TMP/arg.jq" <<'JQ'
+.properties[$k] | "\(.type)\(if .items then " of \(.items.type)" else "" end)" +
+  (if .enum then "\n\none of: \(.enum | join(" | "))" else "" end) + "\n\n\(.description // "")"
+JQ
+
+tty_read() {  # tty_read <prompt> -> prints what the user typed
+  local v; printf '%s' "$1" >/dev/tty; IFS= read -r v </dev/tty || true; printf '%s' "$v"
+}
+
+member_names() {  # current members, fetched with a real tools/call (watch it go by on stderr)
+  [ -f "$TMP/members" ] || request tools/call '{"name":"list_members","arguments":{}}' \
+    | jq -r '.result.content[0].text | fromjson | .members[].name' >"$TMP/members"
+  cat "$TMP/members"
+}
+
+build_args() {  # build_args <tool> -> prints the arguments JSON object
+  local tool="$1" schema required optional chosen key type enum val args='{}'
+  schema=$(jq -c --arg n "$tool" '.result.tools[] | select(.name==$n) | .inputSchema' "$TMP/tools.json")
+  printf '%s' "$schema" >"$TMP/schema.json"
+  required=$(jq -r '.required // [] | .[]' <<<"$schema")
+  optional=$(jq -r '(.required // []) as $r | .properties // {} | keys[] | select(. as $k | $r | index($k) | not)' <<<"$schema")
+
+  chosen=""
+  if [ -n "$optional" ]; then
+    chosen=$(printf '%s\n' "$optional" | fzf --multi --height=60% --reverse \
+      --header "Optional arguments for $tool: TAB to select, ENTER to continue (select none = server defaults)" \
+      --preview "jq -r --arg k {} -f '$TMP/arg.jq' '$TMP/schema.json'" \
+      --preview-window=right,60%,wrap) || true
+  fi
+
+  for key in $required $chosen; do
+    type=$(jq -r --arg k "$key" '.properties[$k].type' <<<"$schema")
+    enum=$(jq -r --arg k "$key" '.properties[$k].enum // [] | .[]' <<<"$schema")
+    if [ -n "$enum" ]; then
+      val=$(printf '%s\n' "$enum" | fzf --height=40% --reverse --header "$key ($tool)") || true
+    elif [ "$key" = member_name ]; then
+      # ENTER on no match uses what you typed: stats/log tools also accept members that have LEFT
+      val=$(member_names | fzf --height=40% --reverse --bind 'enter:accept-or-print-query' \
+            --header "member_name: pick one, or type a departed member's name") || true
+    elif [ "$key" = member_names ]; then
+      val=$(member_names | fzf --multi --height=40% --reverse --header "member_names: TAB to select several" | paste -sd, -) || true
+    else
+      case "$key" in start|end|around|until)
+        printf '%s  time: ISO-8601 UTC. now=%s  1h ago=%s%s\n' "$c_dim" "$(date -u +%FT%TZ)" \
+          "$(date -u -v-1H +%FT%TZ 2>/dev/null || date -u -d '-1 hour' +%FT%TZ)" "$c_off" >/dev/tty ;;
+      esac
+      val=$(tty_read "$key ($type): ")
+    fi
+    [ -z "$val" ] && { printf '%s  (skipped %s)%s\n' "$c_dim" "$key" "$c_off" >/dev/tty; continue; }
+    case "$type" in
+      integer|number) args=$(jq -c --arg k "$key" --argjson v "$val" '. + {($k): $v}' <<<"$args") ;;
+      array)          args=$(jq -c --arg k "$key" --arg v "$val" '. + {($k): ($v | split(",") | map(gsub("^ +| +$"; "")))}' <<<"$args") ;;
+      *)              args=$(jq -c --arg k "$key" --arg v "$val" '. + {($k): $v}' <<<"$args") ;;
+    esac
+  done
+  printf '%s' "$args"
+}
+
 cmd="${1:-tools}"; shift || true
+[ "$cmd" = pick ] && ! command -v fzf >/dev/null && { echo "pick needs fzf: brew install fzf" >&2; exit 2; }
 open_session
 case "$cmd" in
   init) ;;
@@ -130,6 +205,21 @@ case "$cmd" in
     tool="${1:?usage: call <tool> ['<json args>']}"; args="${2:-}"; [ -z "$args" ] && args='{}'
     step "3. tools/call $tool"
     show_tool_result "$(request tools/call "$(jq -nc --arg n "$tool" --argjson a "$args" '{name:$n, arguments:$a}')")"
+    ;;
+  pick)
+    step "3. tools/list  (to build the menu)"
+    request tools/list >"$TMP/tools.json"
+    tool=$(jq -r '.result.tools[] | "\(.name)\t\(.title // "")"' "$TMP/tools.json" \
+      | fzf --height=80% --reverse --delimiter=$'\t' --with-nth=1,2 \
+            --header "Pick a tool (the preview is what the AI model reads)" \
+            --preview "jq -r --arg n {1} -f '$TMP/preview.jq' '$TMP/tools.json'" \
+            --preview-window=right,65%,wrap | cut -f1) || true
+    if [ -n "$tool" ]; then
+      args=$(build_args "$tool")
+      step "3b. tools/call $tool"
+      show_tool_result "$(request tools/call "$(jq -nc --arg n "$tool" --argjson a "$args" '{name:$n, arguments:$a}')")"
+      printf '\n%sRe-run without the menu:  make call T=%s A='"'"'%s'"'"'%s\n' "$c_in" "$tool" "$args" "$c_off" >&2
+    fi
     ;;
   resources)
     step "3. resources/list"

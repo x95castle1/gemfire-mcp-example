@@ -33,6 +33,5 @@ logs: ## Follow logs: make logs [S=mcp-server]
 tools: ## List the MCP tools (raw JSON-RPC)
 	scripts/mcp-curl.sh tools
 
-call: ## Call a tool: make call T=list_members [A='{"role":"server"}']
-	@[ -n "$(T)" ] || { echo "usage: make call T=<tool> [A='<json args>']"; exit 2; }
-	scripts/mcp-curl.sh call $(T) '$(A)'
+call: ## Call a tool: menu (fzf), or make call T=list_members [A='{"role":"servers"}']
+	@if [ -z "$(T)" ]; then scripts/mcp-curl.sh pick; else scripts/mcp-curl.sh call $(T) '$(A)'; fi

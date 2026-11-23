@@ -7,6 +7,8 @@ docker compose logs mcp-server                  # startup summary: tools, resour
 scripts/mcp-curl.sh tools                       # tools/list
 scripts/mcp-curl.sh tool query_stat             # one tool's full definition (what the LLM sees)
 scripts/mcp-curl.sh call list_members           # tools/call
+scripts/mcp-curl.sh pick                        # fzf menu (also: make call): you play the LLM, choosing a tool
+                                                # and filling arguments from its inputSchema
 scripts/mcp-curl.sh call list_regions '{"sort_by":"name"}'
 scripts/mcp-curl.sh resources                   # resources/list
 scripts/mcp-curl.sh read gemfire://stat-signals # resources/read
