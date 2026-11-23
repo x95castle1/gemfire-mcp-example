@@ -8,7 +8,7 @@ Put the licensed GemFire MCP artifacts here. Everything in this folder except th
 | File | What it is | Used by |
 |---|---|---|
 | `gemfire-mcp-server-1.0.0.jar` | Self-contained executable Spring Boot JAR: the MCP server | `docker/mcp-server` (chunk 2) |
-| `gemfire-telemetry-forwarder-1.0.0.tar` | Unpacks to `bin/` + `lib/`: ships `.gfs` + `.log` files to the telemetry store | `docker/telemetry-forwarder` (chunk 4) |
+| `gemfire-telemetry-forwarder-1.0.0.tar` | Unpacks to `bin/` + `lib/`: ships `.gfs` + `.log` files to the telemetry store | `docker/telemetry-forwarder` (chunk 3) |
 
 Check:
 

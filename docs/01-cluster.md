@@ -4,7 +4,7 @@
 docker compose up -d                                   # locator + server-1..3 + gemfire-init
 curl localhost:17070/management/v1/ping                # -> pong
 curl -s localhost:17070/management/v1/members | jq     # what list_members (chunk 2) is built on
-find data/gemfire -name '*.log' -o -name '*.gfs'        # the files the forwarder (chunk 4) will ship
+find data/gemfire -name '*.log' -o -name '*.gfs'        # the files the forwarder (chunk 3) ships
 ```
 
 ## What's running

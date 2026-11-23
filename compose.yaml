@@ -7,7 +7,7 @@ name: gfmcp
 #
 # Every member writes its .log and .gfs into ./data/gemfire/<member>/ (bind-mounted at
 # /var/gemfire), so you can see the files on your laptop and so one telemetry forwarder
-# (chunk 4) can scan them all.
+# (chunk 3) can scan them all.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Notes for every member command below (YAML `>` blocks cannot hold comments):
@@ -156,7 +156,7 @@ services:
       SERVER_ADDRESS: 0.0.0.0
       # The locator's Management REST API. The server appends /management/v1 itself.
       GF_MCP_GEMFIRE_URL: http://locator:7070
-      # Shared with the telemetry forwarder (chunk 4). Empty for now, so history tools return nothing.
+      # MUST match the forwarder's GF_TELEMETRY_STORE: it writes there, we read from there.
       GF_TELEMETRY_STORE: file:///telemetry-store
       # Front-door auth for MCP clients (mode=basic is the default). Both are required.
       GF_MCP_AUTH_BASIC_USERNAME: ${GF_MCP_AUTH_BASIC_USERNAME:?set it in .env}
@@ -175,6 +175,40 @@ services:
     volumes:
       # Read-only on purpose: the MCP server never writes to the store; only the forwarder does.
       - ./data/telemetry-store:/telemetry-store:ro
+    networks: [gfmcp]
+
+  # ── Chunk 3: the telemetry forwarder ────────────────────────────────────────
+  # docker compose --profile telemetry up -d --build telemetry-forwarder
+  #
+  # Every 10s: scan /var/gemfire for member files and copy new or changed ones into the store.
+  #   <member>.gfs        live stats archive -> re-shipped whenever it changes
+  #   <member>-NN-NN.gfs  rolled archive     -> shipped once
+  #   <member>.log        live log           -> shipped from the start, then followed as it grows
+  # It recognizes members by file CONTENT (archive header / the log's "Startup Configuration" block),
+  # so meta-*.log and pulse.log are skipped on purpose.
+  #
+  # It never talks to the MCP server. The contract between them is just: the same GF_TELEMETRY_STORE.
+  telemetry-forwarder:
+    profiles: [telemetry]
+    build:
+      context: .
+      dockerfile: docker/telemetry-forwarder/Dockerfile
+      args:
+        GF_MCP_VERSION: ${GF_MCP_VERSION:-1.0.0}
+    image: gfmcp/gemfire-telemetry-forwarder:${GF_MCP_VERSION:-1.0.0}
+    restart: unless-stopped
+    depends_on:
+      locator: { condition: service_healthy }
+    environment:
+      GF_TELEMETRY_STORE: file:///telemetry-store
+      # The folder holding the members' working directories (scanned up to 5 levels deep)
+      GF_TELEMETRY_FORWARDER_SCAN_DIR: /var/gemfire
+      GF_TELEMETRY_FORWARDER_INTERVAL: "10"
+    volumes:
+      # read-write: the forwarder creates /var/gemfire/.forwarder.lock (one forwarder per folder)
+      - ./data/gemfire:/var/gemfire
+      # read-write: the mirror image of the MCP server's :ro mount
+      - ./data/telemetry-store:/telemetry-store
     networks: [gfmcp]
 
 networks:

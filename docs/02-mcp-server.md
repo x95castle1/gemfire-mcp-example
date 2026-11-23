@@ -77,4 +77,4 @@ Resources (`gemfire://stat-signals`, `gemfire://log-signals`) are reference docu
 | `get_partition_region_health` | ⚠️ `UNKNOWN` | Bucket redundancy comes from the region stats in the archives |
 | `query_stat`, `search_logs`, `get_membership_timeline`, … | ❌ empty | Store only |
 
-**Takeaway:** the telemetry store isn't optional history on top of the live data. Most "is it healthy right now?" answers come from it too. Chunk 4 (the forwarder) is what makes this server useful.
+**Takeaway:** the telemetry store isn't optional history on top of the live data. Most "is it healthy right now?" answers come from it too. Chunk 3 (the forwarder, [docs/03](03-telemetry.md)) is what makes this server useful.

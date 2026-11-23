@@ -12,10 +12,11 @@ ALL := $(COMPOSE) --profile '*'
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z]+:.*## / { printf "  \033[36m%-8s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-start: ## Start the cluster + MCP server (http://localhost:8085/mcp)
+start: ## Start cluster + telemetry forwarder + MCP server (http://localhost:8085/mcp)
 	@[ -f .env ] || { cp .env.example .env; echo "Created .env from .env.example"; }
 	$(COMPOSE) up -d --wait locator server-1 server-2 server-3
 	$(COMPOSE) run --rm gemfire-init 2>&1 | awk '/^Command-/ {sub(/^Command-[0-9]+ *: */, ""); cmd=$$0} /^Status/ {print "  " $$NF "  " cmd}'
+	$(COMPOSE) --profile telemetry up -d --build telemetry-forwarder
 	$(COMPOSE) --profile mcp up -d --build --wait mcp-server
 
 stop: ## Stop and remove containers (keeps ./data)
