@@ -17,7 +17,7 @@ A Docker Compose lab for learning the **Tanzu GemFire MCP Server 1.0**, built on
                      │ uploads .gfs + .log
             telemetry-forwarder ── scans ──▶ /var/gemfire/<member>/   ◀── locator, server-1..3 write here
                                                                          ▲
-                                                               workload (Java client)
+                                                     workload (Spring Boot GemFire client, :18090)
 ```
 
 The MCP server is **read-only**: its 11 tools observe the cluster and never change it. It answers two kinds of questions:
@@ -36,7 +36,7 @@ Note: even "is it healthy *now*?" (heap, GC, CPU, bucket redundancy) is judged f
 | 2 | MCP server (live state) | call `list_members` with raw JSON-RPC via curl | [docs/02](docs/02-mcp-server.md) |
 | 3 | Telemetry pipeline (file store) | query stats history, search logs, see real health | [docs/03](docs/03-telemetry.md) |
 | 4 | Off-the-shelf clients | browse tools in MCP Inspector (`make inspector`), ask Claude Code about the cluster | [docs/04](docs/04-clients.md) |
-| 5 | Workload generator | watch `cache_ops_rate` / `put_latency` move | |
+| 5 | Workload generator | drive traffic with `make load` (steady, burst, hot-key, heap-hog…) and watch `cache_ops_rate` / `put_latency` / heap move | [docs/05](docs/05-workload.md) |
 | 6 | Failure scenarios | kill/pause a server and ask the AI what happened | |
 | 7 | S3 store (SeaweedFS) | swap the store without touching the cluster; browse it with `make seaweed` | [docs/07](docs/07-s3-store.md) |
 | 8 | Runner mode | point the MCP server at `~/dev/gemfire-runner` | |
@@ -55,6 +55,7 @@ make call                  # pick a tool + its arguments from a menu (fzf), then
 make call T=list_members   # or call one directly
 make seaweed               # browse the telemetry bucket (SeaweedFS UI)
 make inspector             # MCP Inspector web UI, already connected to the MCP server
+make load                  # start the workload app + pick a traffic scenario (needs Artifactory creds in .env)
 claude                     # Claude Code in this folder picks up .mcp.json (approve 'gemfire' once)
 make stop                  # stop (keeps ./data)      make clean  # stop + wipe ./data
 ```

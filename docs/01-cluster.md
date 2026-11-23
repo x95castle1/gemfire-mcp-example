@@ -44,4 +44,4 @@ meta-server-1-01.log  *.marker  vf.gf.server.pid  <- GemFire bookkeeping
 1. **The image runs the member in the current directory.** Its entrypoint does `gfsh start … --dry-run` and then `exec`s the java command it prints, so gfsh's `--dir` doesn't move anything. Compose's `working_dir` decides where the files land.
 2. **"Multiple garbage collectors selected".** gfsh adds ZGC by default, so `-XX:+UseG1GC` on its own conflicts. Use `--J=-XX:-UseZGC --J=-XX:+UseG1GC`.
 3. **YAML `>` blocks have no comments.** A `# note` inside `command: >` is passed to gfsh as arguments (`Option '' is not available`).
-4. **The image has no curl.** Health checks use bash's `/dev/tcp`.
+4. **The image has no curl.** Health checks use bash's `/dev/tcp`. Servers ask the locator's REST API whether they're `online`. They no longer just connect to port 40404, because that made every server log an `EOFException` warning every 5 s (see [docs/05](05-workload.md)).

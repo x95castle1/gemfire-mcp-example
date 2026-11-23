@@ -30,8 +30,11 @@ x-server: &server
     locator:
       condition: service_healthy
   healthcheck:
-    # Cache server port accepting connections = cache is up and regions are created
-    test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/40404"]
+    # Ask the locator's Management REST API whether this member (hostname = member name) is online.
+    # Not a raw connect to the cache-server port 40404: a probe that opens it and hangs up without
+    # speaking GemFire's protocol makes the server log "failed accepting client connection
+    # java.io.EOFException" every 5s, noise that ends up in the logs the MCP server searches.
+    test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"status\":\"online\"' <&3"]
     interval: 5s
     timeout: 3s
     start_period: 60s
@@ -217,6 +220,31 @@ services:
       - ./data/gemfire:/var/gemfire
     networks: [gfmcp]
 
+  # ── Chunk 5: workload generator (Spring Boot 4.1 GemFire client) ─────────────
+  # make load  ->  pick a scenario (steady, burst, hot-key, heap-hog, release-heap, stop)
+  # Control API on http://localhost:18090 (/status, /scenarios, POST /scenario/{name})
+  # (host port 18090: gemfire-runner's goodbye-world already owns 8090)
+  workload:
+    profiles: [workload]
+    build:
+      context: workload
+      # Broadcom Artifactory credentials for the Gradle build, from .env, passed as BuildKit secrets
+      secrets: [artifactory_username, artifactory_password]
+    image: gfmcp/workload:dev
+    depends_on:
+      gemfire-init: { condition: service_completed_successfully }   # regions must exist first
+    environment:
+      WORKLOAD_SCENARIO: steady
+    ports:
+      - "18090:8090"
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://127.0.0.1:8090/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 60s
+      retries: 20
+    networks: [gfmcp]
+
   # ── Chunk 4: MCP Inspector, the official MCP debugging UI ─────────────────────
   # make inspector  ->  http://localhost:6274
   # Started already pointed at our MCP server (with the admin/admin Basic header), so the
@@ -293,3 +321,10 @@ services:
 networks:
   gfmcp:
     name: gfmcp
+
+# Build-time secrets (only used by `workload`'s Dockerfile, never stored in the image)
+secrets:
+  artifactory_username:
+    environment: GEMFIRE_ARTIFACTORY_USERNAME
+  artifactory_password:
+    environment: GEMFIRE_ARTIFACTORY_PASSWORD

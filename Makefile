@@ -7,7 +7,7 @@ COMPOSE := docker compose
 # --profile '*' = every profile, so stop/status/logs also see optional services
 ALL := $(COMPOSE) --profile '*'
 
-.PHONY: help start stop clean status logs tools call seaweed inspector
+.PHONY: help start stop clean status logs tools call seaweed inspector load
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z]+:.*## / { printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -54,3 +54,18 @@ inspector: ## Open MCP Inspector (web UI), already connected to the GemFire MCP 
 	  [ -n "$$url" ] && break; sleep 1; done; \
 	[ -n "$$url" ] || { echo "Inspector didn't print its URL yet: make logs S=inspector"; exit 1; }; \
 	echo "open $$url"; open "$$url"
+
+load: ## Drive GemFire traffic: pick a scenario (fzf), or make load P=burst
+	@curl -fs -o /dev/null http://localhost:18090/actuator/health || { \
+	  echo "Starting the workload app (first build downloads dependencies, ~1-3 min)..."; \
+	  echo "$(COMPOSE) --profile workload up -d --build --wait workload"; \
+	  $(COMPOSE) --profile workload up -d --build --wait workload || exit 1; }
+	@p="$(P)"; \
+	if [ -z "$$p" ]; then \
+	  p=$$(curl -fs http://localhost:18090/scenarios | jq -r 'to_entries[] | "\(.key)\t\(.value)"' \
+	    | fzf --height=40% --reverse --delimiter='\t' --with-nth=1,2 --header "Workload scenario (now: $$(curl -fs http://localhost:18090/status | jq -r .scenario))" \
+	    | cut -f1) || exit 0; \
+	fi; \
+	[ -n "$$p" ] || exit 0; \
+	echo "curl -X POST http://localhost:18090/scenario/$$p"; \
+	curl -sS -X POST http://localhost:18090/scenario/$$p | jq .

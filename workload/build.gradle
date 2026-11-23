@@ -1,0 +1,44 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.1'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.example.gfmcp'
+version = '0.0.1'
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+repositories {
+    mavenCentral()
+    // GemFire jars live in Broadcom's Artifactory (same setup as gemfire-runner's hello-world-service).
+    // Credentials come from the environment, never from this file.
+    maven {
+        url = uri('https://packages.broadcom.com/artifactory/gemfire/')
+        credentials {
+            username = System.getenv('GEMFIRE_ARTIFACTORY_USERNAME')
+            password = System.getenv('GEMFIRE_ARTIFACTORY_PASSWORD')
+        }
+    }
+}
+
+dependencies {
+    // Spring Boot 4.1 auto-configuration for a GemFire 10.3 ClientCache
+    implementation 'com.vmware.gemfire:spring-boot-4.1-gemfire-10.3:2.0.1'
+    implementation 'com.vmware.gemfire:spring-boot-actuator-4.1-gemfire-10.3:2.0.1'
+    // The GemFire client itself, same version as the servers
+    implementation 'com.vmware.gemfire:gemfire-core:10.3.4'
+    // Continuous-query module: the GemFire actuator's CQ health check fails ("CqService is not
+    // available") without it, which would make /actuator/health report DOWN
+    implementation 'com.vmware.gemfire:gemfire-cq:10.3.4'
+
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'   // /actuator/prometheus, for chunk 10
+}
+
+bootJar {
+    archiveFileName = 'workload.jar'
+}
