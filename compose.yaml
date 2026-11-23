@@ -1,0 +1,137 @@
+name: gfmcp
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GemFire MCP learning lab.
+#   Chunk 1: cluster = locator + 3 servers + one-shot region init (no profile, always on)
+#   Later chunks add profile-gated services: mcp, telemetry, workload, inspector, s3, assistant
+#
+# Every member writes its .log and .gfs into ./data/gemfire/<member>/ (bind-mounted at
+# /var/gemfire), so you can see the files on your laptop and so one telemetry forwarder
+# (chunk 4) can scan them all.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Notes for every member command below (YAML `>` blocks cannot hold comments):
+#   --J=-XX:-UseZGC --J=-XX:+UseG1GC  gfsh adds ZGC by default; we switch to G1 so GC stats look familiar.
+#   --properties-file                 shared stats/log settings the MCP server depends on (see gemfire/gemfire.properties).
+x-gemfire: &gemfire
+  image: ${GEMFIRE_IMAGE:-gemfire/gemfire:10.3.4-jdk17}
+  environment:
+    ACCEPT_TERMS: "y"
+  volumes:
+    - ./data/gemfire:/var/gemfire
+    - ./gemfire:/config:ro
+  networks: [gfmcp]
+
+x-server: &server
+  <<: *gemfire
+  # No auto-restart: chaos scripts (chunk 6) kill servers on purpose and we want them to stay dead
+  restart: "no"
+  depends_on:
+    locator:
+      condition: service_healthy
+  healthcheck:
+    # Cache server port accepting connections = cache is up and regions are created
+    test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/40404"]
+    interval: 5s
+    timeout: 3s
+    start_period: 60s
+    retries: 30
+
+services:
+
+  locator:
+    <<: *gemfire
+    hostname: locator
+    # The image's entrypoint runs the member in the foreground in the CURRENT directory,
+    # so working_dir is what decides where locator.log / locator.gfs land.
+    working_dir: /var/gemfire/locator
+    restart: on-failure
+    command: >
+      gfsh start locator
+        --name=locator
+        --port=10334
+        --hostname-for-clients=locator
+        --properties-file=/config/gemfire.properties
+        --J=-Dgemfire.statistic-archive-file=locator.gfs
+        --initial-heap=512m --max-heap=512m
+        --J=-XX:-UseZGC --J=-XX:+UseG1GC
+        --enable-cluster-configuration=true
+        --http-service-port=7070
+        --J=-Dgemfire.enable-management-rest-service=true
+        --J=-Dgemfire.jmx-manager-hostname-for-clients=locator
+    ports:
+      # Management REST API (what the MCP server talks to). Host port 17070 avoids gemfire-runner's 7070.
+      - "17070:7070"
+    healthcheck:
+      # The same check the MCP docs use: GET /management/v1/ping -> "pong" (bash /dev/tcp; the image has no curl)
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7070 && printf 'GET /management/v1/ping HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q pong <&3"]
+      interval: 5s
+      timeout: 3s
+      start_period: 60s
+      retries: 30
+
+  server-1:
+    <<: *server
+    hostname: server-1
+    working_dir: /var/gemfire/server-1
+    command: >
+      gfsh start server
+        --name=server-1
+        --locators=locator[10334]
+        --server-port=40404
+        --hostname-for-clients=server-1
+        --properties-file=/config/gemfire.properties
+        --J=-Dgemfire.statistic-archive-file=server-1.gfs
+        --initial-heap=768m --max-heap=768m
+        --J=-XX:-UseZGC --J=-XX:+UseG1GC
+        --eviction-heap-percentage=75
+        --critical-heap-percentage=90
+
+  server-2:
+    <<: *server
+    hostname: server-2
+    working_dir: /var/gemfire/server-2
+    command: >
+      gfsh start server
+        --name=server-2
+        --locators=locator[10334]
+        --server-port=40404
+        --hostname-for-clients=server-2
+        --properties-file=/config/gemfire.properties
+        --J=-Dgemfire.statistic-archive-file=server-2.gfs
+        --initial-heap=768m --max-heap=768m
+        --J=-XX:-UseZGC --J=-XX:+UseG1GC
+        --eviction-heap-percentage=75
+        --critical-heap-percentage=90
+
+  server-3:
+    <<: *server
+    hostname: server-3
+    working_dir: /var/gemfire/server-3
+    command: >
+      gfsh start server
+        --name=server-3
+        --locators=locator[10334]
+        --server-port=40404
+        --hostname-for-clients=server-3
+        --properties-file=/config/gemfire.properties
+        --J=-Dgemfire.statistic-archive-file=server-3.gfs
+        --initial-heap=768m --max-heap=768m
+        --J=-XX:-UseZGC --J=-XX:+UseG1GC
+        --eviction-heap-percentage=75
+        --critical-heap-percentage=90
+
+  # One-shot: creates the demo regions (stored in cluster config), then exits 0.
+  gemfire-init:
+    <<: *gemfire
+    restart: "no"
+    working_dir: /tmp
+    depends_on:
+      server-1: { condition: service_healthy }
+      server-2: { condition: service_healthy }
+      server-3: { condition: service_healthy }
+    command: gfsh run --file=/config/init-cluster.gfsh
+
+networks:
+  gfmcp:
+    name: gfmcp

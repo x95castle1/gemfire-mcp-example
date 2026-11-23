@@ -1,0 +1,19 @@
+# One-shot cluster setup, run by the `gemfire-init` container after the servers are up.
+# Regions are stored in the locator's cluster configuration, so restarted servers get them back.
+#
+# Each region is picked to make a specific MCP signal show up in later chunks:
+connect --locator=locator[10334]
+
+# 1 redundant copy: killing one server -> get_partition_region_health shows DEGRADED (data still safe)
+create region --name=Customers --type=PARTITION_REDUNDANT --if-not-exists
+
+# Redundant + persisted to disk: survives a full cluster restart
+create region --name=Orders --type=PARTITION_REDUNDANT_PERSISTENT --if-not-exists
+
+# NO redundancy: killing a server loses buckets -> NO_COPIES. Also the target for heap-hog.
+create region --name=Sessions --type=PARTITION --if-not-exists
+
+# Full copy on every server: small reference data
+create region --name=Products --type=REPLICATE --if-not-exists
+
+list regions

@@ -30,7 +30,7 @@ The MCP server is **read-only**: its 11 tools observe the cluster and never chan
 | # | Chunk | You can now… | Notes |
 |---|---|---|---|
 | 0 | Prerequisites & skeleton | have the artifacts and know the version matrix | [docs/00](docs/00-prerequisites.md) |
-| 1 | GemFire cluster | `curl localhost:17070/management/v1/ping` → `pong` | |
+| 1 | GemFire cluster | `curl localhost:17070/management/v1/ping` → `pong` | [docs/01](docs/01-cluster.md) |
 | 2 | MCP server (live state) | call `list_members` with raw JSON-RPC via curl | |
 | 3 | Off-the-shelf clients | browse tools in MCP Inspector, ask Claude Code about the cluster | |
 | 4 | Telemetry pipeline (file store) | query stats history and search logs | |
@@ -46,4 +46,6 @@ The MCP server is **read-only**: its 11 tools observe the cluster and never chan
 ```bash
 cp .env.example .env        # then edit passwords
 # put the two vendor artifacts in ./vendor (see vendor/README.md)
+docker compose up -d        # chunk 1: the cluster
+curl localhost:17070/management/v1/ping
 ```
