@@ -12,7 +12,7 @@ A Docker Compose lab for learning the **Tanzu GemFire MCP Server 1.0**, built on
                      │
                      │ history (stats + logs)
                      ▼
-              telemetry store  (file:// volume, later s3:// on MinIO)
+              telemetry store  (s3://gemfire-telemetry/gfmcp on SeaweedFS)
                      ▲
                      │ uploads .gfs + .log
             telemetry-forwarder ── scans ──▶ /var/gemfire/<member>/   ◀── locator, server-1..3 write here
@@ -38,7 +38,7 @@ Note: even "is it healthy *now*?" (heap, GC, CPU, bucket redundancy) is judged f
 | 4 | Off-the-shelf clients | browse tools in MCP Inspector, ask Claude Code about the cluster | |
 | 5 | Workload generator | watch `cache_ops_rate` / `put_latency` move | |
 | 6 | Failure scenarios | kill/pause a server and ask the AI what happened | |
-| 7 | S3 store (MinIO) | swap the store without touching the cluster | |
+| 7 | S3 store (SeaweedFS) | swap the store without touching the cluster; browse it with `make seaweed` | [docs/07](docs/07-s3-store.md) |
 | 8 | Runner mode | point the MCP server at `~/dev/gemfire-runner` | |
 | 9 | SRE assistant | your own MCP client + Claude, with a JSON-RPC trace | |
 | 10 | Security (stretch) | OAuth + RBAC, a secured cluster, TLS | |
@@ -47,11 +47,12 @@ Note: even "is it healthy *now*?" (heap, GC, CPU, bucket redundancy) is judged f
 
 ```bash
 make                       # list the targets
-make start                 # cluster + telemetry forwarder + MCP server (about 30s from scratch)
+make start                 # cluster + S3 store + telemetry forwarder + MCP server (~45s from scratch)
 make status                # containers + health
 make tools                 # MCP tools/list via raw JSON-RPC
 make call                  # pick a tool + its arguments from a menu (fzf), then call it
 make call T=list_members   # or call one directly
+make seaweed               # browse the telemetry bucket (SeaweedFS UI)
 make stop                  # stop (keeps ./data)      make clean  # stop + wipe ./data
 ```
 

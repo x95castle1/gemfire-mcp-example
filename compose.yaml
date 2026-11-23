@@ -37,6 +37,16 @@ x-server: &server
     start_period: 60s
     retries: 30
 
+# The ONE contract between the forwarder (writes) and the MCP server (reads): the same store.
+# Chunk 7: an S3 bucket on SeaweedFS. /gfmcp is this cluster's prefix: one prefix per cluster,
+# because nothing stops two clusters sharing a location from mixing their data.
+x-telemetry-store: &telemetry-store
+  GF_TELEMETRY_STORE: s3://gemfire-telemetry/gfmcp
+  # Any S3-compatible store: setting an endpoint also switches to path-style URLs (http://seaweedfs:8333/<bucket>/...)
+  GF_S3_ENDPOINT: http://seaweedfs:8333
+  GF_S3_ACCESS_KEY: admin
+  GF_S3_SECRET_KEY: admin
+
 services:
 
   locator:
@@ -137,8 +147,8 @@ services:
   #
   # Two data sources, two settings:
   #   GF_MCP_GEMFIRE_URL  -> live state (list_members, list_regions, assess_cluster_health, ...)
-  #   GF_TELEMETRY_STORE  -> history (stats + logs). Required even while empty: the server checks it
-  #                          is reachable at startup; an empty store only logs a warning.
+  #   GF_TELEMETRY_STORE  -> history (stats + logs). Required even while empty: the server refuses to
+  #                          start if it can't reach the store; an empty store only logs a warning.
   # Careful: an UNKNOWN GF_MCP_* variable (e.g. a typo) makes the server refuse to start.
   mcp-server:
     profiles: [mcp]
@@ -151,13 +161,13 @@ services:
     hostname: mcp-server
     depends_on:
       locator: { condition: service_healthy }
+      s3-init: { condition: service_completed_successfully }
     environment:
+      <<: *telemetry-store
       # Default is 127.0.0.1 (loopback), which inside a container means unreachable from outside.
       SERVER_ADDRESS: 0.0.0.0
       # The locator's Management REST API. The server appends /management/v1 itself.
       GF_MCP_GEMFIRE_URL: http://locator:7070
-      # MUST match the forwarder's GF_TELEMETRY_STORE: it writes there, we read from there.
-      GF_TELEMETRY_STORE: file:///telemetry-store
       # Front-door auth for MCP clients (mode=basic is the default). Both are required.
       GF_MCP_AUTH_BASIC_USERNAME: ${GF_MCP_AUTH_BASIC_USERNAME:?set it in .env}
       GF_MCP_AUTH_BASIC_PASSWORD: ${GF_MCP_AUTH_BASIC_PASSWORD:?set it in .env}
@@ -172,9 +182,6 @@ services:
       timeout: 3s
       start_period: 30s
       retries: 20
-    volumes:
-      # Read-only on purpose: the MCP server never writes to the store; only the forwarder does.
-      - ./data/telemetry-store:/telemetry-store:ro
     networks: [gfmcp]
 
   # ── Chunk 3: the telemetry forwarder ────────────────────────────────────────
@@ -199,16 +206,62 @@ services:
     restart: unless-stopped
     depends_on:
       locator: { condition: service_healthy }
+      s3-init: { condition: service_completed_successfully }
     environment:
-      GF_TELEMETRY_STORE: file:///telemetry-store
+      <<: *telemetry-store
       # The folder holding the members' working directories (scanned up to 5 levels deep)
       GF_TELEMETRY_FORWARDER_SCAN_DIR: /var/gemfire
       GF_TELEMETRY_FORWARDER_INTERVAL: "10"
     volumes:
       # read-write: the forwarder creates /var/gemfire/.forwarder.lock (one forwarder per folder)
       - ./data/gemfire:/var/gemfire
-      # read-write: the mirror image of the MCP server's :ro mount
-      - ./data/telemetry-store:/telemetry-store
+    networks: [gfmcp]
+
+  # ── Chunk 7: S3 telemetry store on SeaweedFS ─────────────────────────────────
+  # One container = master + volume server + filer + S3 gateway.
+  #   http://localhost:8333  S3 API            (user admin / secret admin, see seaweedfs/s3.json)
+  #   http://localhost:8888  filer file browser -> make seaweed
+  seaweedfs:
+    profiles: [telemetry, mcp]
+    image: chrislusf/seaweedfs:4.55
+    hostname: seaweedfs
+    restart: unless-stopped
+    # The image's entrypoint turns on 1 GB preallocated volumes; flags given later win, so switch that off
+    command: >
+      server -s3 -filer
+        -s3.config=/etc/seaweedfs/s3.json
+        -master.volumePreallocate=false
+        -master.volumeSizeLimitMB=64
+    ports:
+      - "8333:8333"
+      - "8888:8888"
+    volumes:
+      - ./data/seaweedfs:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8888/"]
+      interval: 3s
+      timeout: 3s
+      start_period: 30s
+      retries: 20
+    networks: [gfmcp]
+
+  # One-shot: create the bucket if it isn't there yet (the forwarder doesn't create buckets).
+  s3-init:
+    profiles: [telemetry, mcp]
+    image: amazon/aws-cli:latest
+    depends_on:
+      seaweedfs: { condition: service_healthy }
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: admin
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        aws --endpoint-url http://seaweedfs:8333 s3api head-bucket --bucket gemfire-telemetry 2>/dev/null
+        && echo "bucket gemfire-telemetry exists"
+        || aws --endpoint-url http://seaweedfs:8333 s3 mb s3://gemfire-telemetry
     networks: [gfmcp]
 
 networks:

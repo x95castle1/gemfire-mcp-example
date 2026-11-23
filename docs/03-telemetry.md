@@ -1,5 +1,7 @@
 # 03: The telemetry forwarder and the store
 
+> **Update (chunk 7):** the store is now an S3 bucket, `s3://gemfire-telemetry/gfmcp` on SeaweedFS. Everything below still applies, and the layout is identical, but as object keys. Browse it with `make seaweed` instead of `find data/telemetry-store`. See [docs/07](07-s3-store.md).
+
 ```bash
 make start                                   # now also starts telemetry-forwarder
 make logs S=telemetry-forwarder              # watch it ship: "Shipped LIVE / ROLLED / LOG chunk"
