@@ -1,0 +1,20 @@
+# Vendor artifacts from support.broadcom.com (licensed, never commit)
+vendor/*
+!vendor/README.md
+
+# Local secrets
+.env
+
+# Runtime data
+data/
+
+# Build outputs
+build/
+.gradle/
+out/
+target/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
