@@ -217,6 +217,30 @@ services:
       - ./data/gemfire:/var/gemfire
     networks: [gfmcp]
 
+  # ── Chunk 4: MCP Inspector, the official MCP debugging UI ─────────────────────
+  # make inspector  ->  http://localhost:6274
+  # Started already pointed at our MCP server (with the admin/admin Basic header), so the
+  # Tools / Resources / History tabs work without typing anything into the UI.
+  inspector:
+    profiles: [inspector]
+    image: ghcr.io/modelcontextprotocol/inspector:2.16.0
+    command:
+      - --web
+      - --transport
+      - http
+      - --server-url
+      - http://mcp-server:8085/mcp
+      - --header
+      - "Authorization: Basic YWRtaW46YWRtaW4="
+    environment:
+      # No OS keychain in a container; say so explicitly instead of getting a warning at startup
+      MCP_INSPECTOR_SECRET_STORE: memory
+    ports:
+      - "6274:6274"   # web UI (needs the per-start token: make inspector reads it from the log)
+      - "6275:6275"   # sandbox (renders MCP App UIs; unused by GemFire's tools)
+      - "6278:6278"   # MCP App origin
+    networks: [gfmcp]
+
   # ── Chunk 7: S3 telemetry store on SeaweedFS ─────────────────────────────────
   # One container = master + volume server + filer + S3 gateway.
   #   http://localhost:8333  S3 API            (user admin / secret admin, see seaweedfs/s3.json)

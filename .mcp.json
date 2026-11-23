@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "gemfire": {
+      "type": "http",
+      "url": "http://localhost:8085/mcp",
+      "headers": {
+        "Authorization": "Basic YWRtaW46YWRtaW4="
+      }
+    }
+  }
+}

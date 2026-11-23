@@ -35,13 +35,14 @@ Note: even "is it healthy *now*?" (heap, GC, CPU, bucket redundancy) is judged f
 | 1 | GemFire cluster | `curl localhost:17070/management/v1/ping` → `pong` | [docs/01](docs/01-cluster.md) |
 | 2 | MCP server (live state) | call `list_members` with raw JSON-RPC via curl | [docs/02](docs/02-mcp-server.md) |
 | 3 | Telemetry pipeline (file store) | query stats history, search logs, see real health | [docs/03](docs/03-telemetry.md) |
-| 4 | Off-the-shelf clients | browse tools in MCP Inspector, ask Claude Code about the cluster | |
+| 4 | Off-the-shelf clients | browse tools in MCP Inspector (`make inspector`), ask Claude Code about the cluster | [docs/04](docs/04-clients.md) |
 | 5 | Workload generator | watch `cache_ops_rate` / `put_latency` move | |
 | 6 | Failure scenarios | kill/pause a server and ask the AI what happened | |
 | 7 | S3 store (SeaweedFS) | swap the store without touching the cluster; browse it with `make seaweed` | [docs/07](docs/07-s3-store.md) |
 | 8 | Runner mode | point the MCP server at `~/dev/gemfire-runner` | |
-| 9 | SRE assistant | your own MCP client + Claude, with a JSON-RPC trace | |
-| 10 | Security (stretch) | OAuth + RBAC, a secured cluster, TLS | |
+| 9 | SRE assistant | your own MCP client (Spring AI) with a **swappable model** (Claude by default, Qwen via local Ollama) and a JSON-RPC trace | |
+| 10 | Observability | Prometheus + Grafana for the lab itself: GemFire member metrics, the MCP server, the forwarder's ship stats, SeaweedFS, plus the MCP server's audit log (`gf-mcp.audit`) | |
+| 11 | Security (stretch) | OAuth + RBAC, a secured cluster, TLS | |
 
 ## Quickstart
 
@@ -53,6 +54,8 @@ make tools                 # MCP tools/list via raw JSON-RPC
 make call                  # pick a tool + its arguments from a menu (fzf), then call it
 make call T=list_members   # or call one directly
 make seaweed               # browse the telemetry bucket (SeaweedFS UI)
+make inspector             # MCP Inspector web UI, already connected to the MCP server
+claude                     # Claude Code in this folder picks up .mcp.json (approve 'gemfire' once)
 make stop                  # stop (keeps ./data)      make clean  # stop + wipe ./data
 ```
 

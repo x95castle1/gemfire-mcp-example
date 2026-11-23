@@ -7,10 +7,10 @@ COMPOSE := docker compose
 # --profile '*' = every profile, so stop/status/logs also see optional services
 ALL := $(COMPOSE) --profile '*'
 
-.PHONY: help start stop clean status logs tools call seaweed
+.PHONY: help start stop clean status logs tools call seaweed inspector
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*## "} /^[a-z]+:.*## / { printf "  \033[36m%-8s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-z]+:.*## / { printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 start: ## Start cluster + S3 store + telemetry forwarder + MCP server (:8085/mcp)
 	@[ -f .env ] || { cp .env.example .env; echo "Created .env from .env.example"; }
@@ -45,3 +45,12 @@ call: ## Call a tool: menu (fzf), or make call T=list_members [A='{"role":"serve
 
 seaweed: ## Open the SeaweedFS file browser on the telemetry bucket
 	open http://localhost:8888/buckets/gemfire-telemetry/gfmcp/
+
+inspector: ## Open MCP Inspector (web UI), already connected to the GemFire MCP server
+	$(COMPOSE) --profile inspector up -d inspector
+	@# Inspector makes a new auth token on every start and prints the URL (with token) in its log
+	@url=""; for i in $$(seq 1 30); do \
+	  url=$$($(COMPOSE) --profile inspector logs --no-log-prefix inspector 2>/dev/null | grep -oE 'http://localhost:6274\?MCP_INSPECTOR_API_TOKEN=[0-9a-f]+' | tail -1); \
+	  [ -n "$$url" ] && break; sleep 1; done; \
+	[ -n "$$url" ] || { echo "Inspector didn't print its URL yet: make logs S=inspector"; exit 1; }; \
+	echo "open $$url"; open "$$url"
