@@ -14,6 +14,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import io.micrometer.core.instrument.FunctionCounter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
 import org.apache.geode.cache.LowMemoryException;
 import org.slf4j.Logger;
@@ -87,9 +90,31 @@ public class LoadGenerator {
 
     private final String initialScenario;
 
-    public LoadGenerator(Regions regions, @Value("${workload.scenario:steady}") String initialScenario) {
+    public LoadGenerator(Regions regions, @Value("${workload.scenario:steady}") String initialScenario, MeterRegistry meters) {
         this.regions = regions;
         this.initialScenario = initialScenario;
+        registerMetrics(meters);
+    }
+
+    /**
+     * Chunk 8: the same counters as /status, as Prometheus metrics on /actuator/prometheus. Function
+     * counters/gauges read the existing AtomicLongs when scraped; nothing extra happens per operation.
+     */
+    private void registerMetrics(MeterRegistry meters) {
+        FunctionCounter.builder("workload.operations", puts, AtomicLong::get)
+                .tag("op", "put").description("puts sent to GemFire").register(meters);
+        FunctionCounter.builder("workload.operations", gets, AtomicLong::get)
+                .tag("op", "get").description("gets sent to GemFire").register(meters);
+        FunctionCounter.builder("workload.errors", rejectedLowMemory, AtomicLong::get)
+                .tag("kind", "rejected_low_memory").description("puts refused by a server at critical heap").register(meters);
+        FunctionCounter.builder("workload.errors", errors, AtomicLong::get)
+                .tag("kind", "other").register(meters);
+        FunctionCounter.builder("workload.dropped", dropped, AtomicLong::get)
+                .description("operations skipped because too many were in flight").register(meters);
+        Gauge.builder("workload.target.ops.per.second", scenario, s -> s.get().opsPerSecond).register(meters);
+        for (Scenario s : Scenario.values()) {   // 1 for the active scenario, 0 for the rest
+            Gauge.builder("workload.scenario", scenario, cur -> cur.get() == s ? 1 : 0).tag("scenario", s.id).register(meters);
+        }
     }
 
     @EventListener(ApplicationReadyEvent.class)

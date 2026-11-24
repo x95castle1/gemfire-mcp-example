@@ -1,0 +1,50 @@
+# Chunk 8: what Prometheus scrapes. UI: http://localhost:19090 (Status -> Targets shows each one UP/DOWN)
+global:
+  scrape_interval: 15s      # matches gemfire.prometheus.metrics.interval=15s in compose.yaml
+  evaluation_interval: 15s
+
+scrape_configs:
+  # GemFire's built-in endpoint on each member's HTTP service (note the trailing slash: /metrics redirects).
+  - job_name: gemfire
+    metrics_path: /metrics/
+    static_configs:
+      - targets: ["locator:7070", "server-1:7070", "server-2:7070", "server-3:7070"]
+    relabel_configs:
+      # node = the member name (locator, server-1, ...) taken from the target's host
+      - source_labels: [__address__]
+        regex: "([^:]+):.*"
+        target_label: node
+    metric_relabel_configs:
+      # GemFire labels most metrics member="server-2(server-2:1)<v2>:58389". The <v2>:58389 part (membership
+      # view id + port) changes on every restart and would start a new time series each time. Keep the name.
+      - source_labels: [member]
+        regex: "([^(]+)\\(.*"
+        target_label: member
+      # GemFire's own "instance" label (region, stats instance) clashes with Prometheus' target label and
+      # would be renamed exported_instance; give it a clearer name.
+      - source_labels: [exported_instance]
+        target_label: stat
+      - regex: exported_instance
+        action: labeldrop
+
+  # The Spring Boot workload (chunk 5): JVM + our workload_* counters
+  - job_name: workload
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["workload:8090"]
+
+  # SeaweedFS (the S3 telemetry store): -metricsPort=9327 in compose.yaml
+  - job_name: seaweedfs
+    static_configs:
+      - targets: ["seaweedfs:9327"]
+
+  # The observability stack watching itself
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
+  - job_name: alloy
+    static_configs:
+      - targets: ["alloy:12345"]
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

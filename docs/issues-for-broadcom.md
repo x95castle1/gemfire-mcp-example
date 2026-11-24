@@ -1,6 +1,6 @@
 # Issues found while building the lab (candidates to report to Broadcom)
 
-Found between 2026-11-23 and 2026-11-24 while building this lab, mostly during chunk 6 (failure scenarios). Each issue has the versions, steps to reproduce, what we expected, what happened, the evidence (log lines and tool output copied verbatim), the workaround we used, and how sure we are.
+Found between 2026-11-23 and 2026-11-24 while building this lab, mostly during chunks 6 (failure scenarios) and 8 (observability). Each issue has the versions, steps to reproduce, what we expected, what happened, the evidence (log lines and tool output copied verbatim), the workaround we used, and how sure we are.
 
 | # | Product | Issue | Type | Confidence |
 |---|---|---|---|---|
@@ -10,6 +10,9 @@ Found between 2026-11-23 and 2026-11-24 while building this lab, mostly during c
 | 4 | GemFire MCP Server 1.0.0 | `assess_cluster_health` returns UNKNOWN for stats-based checks while the Management REST API is down, though the telemetry store has the data | Enhancement | High (observed); whether it's intended is unknown |
 | 5 | GemFire MCP Server 1.0.0 | `membership_events` keeps the overall status CRITICAL for 15 minutes after a full recovery, with no sign the event is over | Enhancement | High (observed); likely by design |
 | 6 | Spring for GemFire 2.0.1 + GemFire 10.3.4 | Every client startup logs 3 ERROR-level `DEPRECATED` stack traces from `ClientCacheFactoryBean.configurePool` | Bug / noise | High: every startup |
+| 7 | GemFire 10.3.4 | `No host/bind address specified: Using localhost` logged at INFO twice on every Management REST request about a member: 47% of each server's log | Bug / noise | High: measured, and the workaround removed it |
+| 8 | GemFire 10.3.4 | A server's Prometheus `/metrics` endpoint only starts if the developer REST API is enabled too | Question / docs | High: confirmed in the code |
+| 9 | GemFire MCP Server 1.0.0 + forwarder 1.0.0 | No metrics endpoint on either component; the audit log has no MCP method/tool name; with the failed-login limit off, failed logins aren't audited at all | Enhancement | High (observed) |
 
 ## Environment
 
@@ -215,6 +218,59 @@ ERROR ... PoolFactory.setPRSingleHopEnabled(boolean) is deprecated ... (PoolFact
 **Impact:** ERROR-level noise in every client's logs. These are exactly the logs an operator, or an AI assistant using `search_logs` with `min_severity: ERROR`, will look at first.
 
 **Workaround:** none in our code (the calls come from the framework). We left them visible rather than silence a GemFire logger.
+
+---
+
+## 7. `No host/bind address specified: Using localhost` fills the server logs
+
+**Product:** GemFire 10.3.4 (`org.apache.geode.metrics.PublishingService`)
+
+**Steps to reproduce:** start a server without `http-service-bind-address`. Call the locator's Management REST API about that member repeatedly, e.g. `GET /management/v1/members/server-1` every 5 s (a typical container healthcheck). Other clients of that endpoint, such as the GemFire MCP Server, presumably trigger it too, but we only measured the healthcheck.
+
+**Actual:** two INFO lines per request in the **server's** log:
+```
+[info 2026/11/24 20:05:08.114 GMT server-2 <P2P message reader for locator(locator:1:locator)<ec><v0>:54338 unshared ordered sender uid=8 ...> tid=0x96] No host/bind address specified: Using localhost server-2
+[info 2026/11/24 20:05:08.114 GMT server-2 <P2P message reader for locator(locator:1:locator)<ec><v0>:54338 unshared ordered sender uid=8 ...> tid=0x96] No host/bind address specified: Using localhost server-2
+```
+Measured: **1,138 of 2,401 lines (47%)** of server-2's log, and 24 lines a minute per server with a 5 s healthcheck. The same message comes from `PublishingService.getHostname()`, which builds the member's metrics URL. It apparently runs on every member-info request, even when `gemfire.prometheus.metrics.emission` is `None`.
+
+**Expected:** log it once at startup (or at DEBUG), not on every request.
+
+**Impact:** half of each server's log is noise. These are the logs operators read, and the logs the GemFire MCP Server's `search_logs` searches, with a 500-event cap per call.
+
+**Workaround:** set `--http-service-bind-address=<host>` on each server. The count went from 24 lines a minute to **0**.
+
+---
+
+## 8. A server's Prometheus endpoint needs the developer REST API
+
+**Product:** GemFire 10.3.4 (`GemFireCacheImpl.startMetricsApi`)
+
+**Steps to reproduce:** start a server with `-Dgemfire.prometheus.metrics.emission=Default` and `--http-service-port=7070`.
+
+**Actual:** the server logs `Metrics endpoint will not be started` and `:7070/metrics` isn't served. In `GemFireCacheImpl.startMetricsApi` the endpoint starts only if:
+- the member is a locator with the Management REST service (or a started JMX manager) enabled, **or**
+- the member is a server with **`start-dev-rest-api=true`**.
+
+With `--start-rest-api=true` it works, but that also exposes the developer REST API (`/gemfire-api`, read/write access to region data) just to get metrics.
+
+**Questions:**
+- Is that coupling intended?
+- If it is, the metrics documentation should say so. The log line could also say *why* the endpoint won't start; it already does for the other cases ("disabled by http-services configuration", "Unable to find the Prometheus metrics WAR").
+
+Two smaller notes from the same work:
+- `/metrics` answers with a `301` to `/metrics/`. Scrape configs need the trailing slash.
+- Most metrics carry `member="server-2(server-2:1)<v2>:58389"`. The view id and port change on every restart, so each restart starts a new time series. We rewrite it to `server-2` in Prometheus.
+
+---
+
+## 9. MCP server / forwarder observability gaps
+
+**Product:** GemFire MCP Server 1.0.0, telemetry forwarder 1.0.0. Enhancement requests.
+
+1. **No metrics endpoint on either.** The MCP server JAR has Micrometer core but no Actuator or Prometheus registry. The forwarder reports itself only as a log line every minute (`plane=stats membersDiscovered=4 rolledShipped=1 liveShipped=863 bytesShipped=951297958 uploadFailures=0 millisSinceLastSuccessfulUpload=277 oldestUnshippedRolledAgeMillis=0`). We chart both by parsing logs in Loki, which works but is fragile. A `/metrics` endpoint would be better: requests, tool calls by name, store read latency, circuit-breaker state, forwarder ship counts.
+2. **The audit log has no MCP method or tool name.** Each line is an HTTP request (`"method":"POST","path":"/mcp","status":200,"durationMs":161`), so you can't tell `tools/list` from a `search_logs` call, or which tool was slow. Adding the JSON-RPC method and tool name would make the audit log answer "what did the AI do?".
+3. **With `GF_MCP_AUTH_FAILURE_LIMIT_ENABLED=false`, failed logins leave no audit line at all.** A request with a wrong password got a 401, and nothing appeared in `gf-mcp.audit`. The config comment explains that rejected logins are "audited by the failed-login throttle", so turning off the throttle also turns off the auditing. Auditing auth failures should be separate from rate-limiting them.
 
 ---
 

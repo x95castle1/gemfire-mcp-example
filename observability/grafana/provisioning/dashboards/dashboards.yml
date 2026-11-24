@@ -1,0 +1,10 @@
+# Chunk 8: load every dashboard JSON in /var/lib/grafana/dashboards (= observability/grafana/dashboards).
+# Edits made in the UI are allowed but not saved back to the file: change the JSON to keep them.
+apiVersion: 1
+providers:
+  - name: gfmcp
+    folder: GemFire MCP Lab
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

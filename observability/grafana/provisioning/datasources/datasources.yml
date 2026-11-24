@@ -1,0 +1,15 @@
+# Chunk 8: Grafana reads these at startup, so the datasources exist without clicking anything.
+# Fixed uids so the dashboard JSON can refer to them.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s        # = the scrape interval
+  - name: Loki
+    uid: loki
+    type: loki
+    url: http://loki:3100

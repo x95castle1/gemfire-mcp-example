@@ -18,6 +18,14 @@ name: gfmcp
 #   --properties-file                 shared stats/log settings the MCP server depends on (see gemfire/gemfire.properties).
 #   working_dir                       the image's entrypoint runs the member in the foreground in the CURRENT
 #                                     directory, so working_dir decides where <member>.log / <member>.gfs land.
+#   prometheus.metrics.*              (chunk 8) GemFire's built-in Prometheus endpoint: GET :7070/metrics on the
+#                                     member's HTTP service. Off ("None") by default; "Default" = a curated set.
+#                                     Its default interval is 1m, too coarse for dashboards, so 15s.
+#   --http-service-port/bind-address  (chunk 8) servers don't run an HTTP service unless told to; /metrics needs
+#                                     one. The bind address also stops "No host/bind address specified: Using
+#                                     localhost" being logged twice on every Management REST call about the member.
+#   --start-rest-api=true             (chunk 8) GemFire only starts a SERVER's /metrics endpoint when its developer
+#                                     REST API (/gemfire-api) is on too (found in GemFireCacheImpl.startMetricsApi).
 
 services:
 
@@ -43,14 +51,18 @@ services:
         --J=-XX:-UseZGC --J=-XX:+UseG1GC
         --enable-cluster-configuration=true
         --http-service-port=7070
+        --http-service-bind-address=locator
+        --J=-Dgemfire.prometheus.metrics.emission=Default
+        --J=-Dgemfire.prometheus.metrics.interval=15s
         --J=-Dgemfire.enable-management-rest-service=true
         --J=-Dgemfire.jmx-manager-hostname-for-clients=locator
     ports:
       # Management REST API (what the MCP server talks to). Host port 17070 avoids gemfire-runner's 7070.
       - "17070:7070"
     healthcheck:
-      # The same check the MCP docs use: GET /management/v1/ping -> "pong" (bash /dev/tcp; the image has no curl)
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7070 && printf 'GET /management/v1/ping HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q pong <&3"]
+      # The same check the MCP docs use: GET /management/v1/ping -> "pong" (bash /dev/tcp; the image has no curl).
+      # To "locator", not 127.0.0.1: with --http-service-bind-address the HTTP service no longer listens on loopback.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/ping HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' >&3 && grep -q pong <&3"]
       interval: 5s
       timeout: 3s
       start_period: 60s
@@ -95,6 +107,11 @@ services:
         --J=-XX:-UseZGC --J=-XX:+UseG1GC
         --eviction-heap-percentage=75
         --critical-heap-percentage=90
+        --http-service-port=7070
+        --http-service-bind-address=server-1
+        --start-rest-api=true
+        --J=-Dgemfire.prometheus.metrics.emission=Default
+        --J=-Dgemfire.prometheus.metrics.interval=15s
 
   server-2:
     image: ${GEMFIRE_IMAGE:-gemfire/gemfire:10.3.4-jdk17}
@@ -127,6 +144,11 @@ services:
         --J=-XX:-UseZGC --J=-XX:+UseG1GC
         --eviction-heap-percentage=75
         --critical-heap-percentage=90
+        --http-service-port=7070
+        --http-service-bind-address=server-2
+        --start-rest-api=true
+        --J=-Dgemfire.prometheus.metrics.emission=Default
+        --J=-Dgemfire.prometheus.metrics.interval=15s
 
   server-3:
     image: ${GEMFIRE_IMAGE:-gemfire/gemfire:10.3.4-jdk17}
@@ -159,6 +181,11 @@ services:
         --J=-XX:-UseZGC --J=-XX:+UseG1GC
         --eviction-heap-percentage=75
         --critical-heap-percentage=90
+        --http-service-port=7070
+        --http-service-bind-address=server-3
+        --start-rest-api=true
+        --J=-Dgemfire.prometheus.metrics.emission=Default
+        --J=-Dgemfire.prometheus.metrics.interval=15s
 
   # One-shot: creates the demo regions (stored in cluster config), then exits 0.
   gemfire-init:
@@ -322,11 +349,13 @@ services:
     hostname: seaweedfs
     restart: unless-stopped
     # The image's entrypoint turns on 1 GB preallocated volumes; flags given later win, so switch that off
+    # -metricsPort=9327: Prometheus metrics for chunk 8 (observability)
     command: >
       server -s3 -filer
         -s3.config=/etc/seaweedfs/s3.json
         -master.volumePreallocate=false
         -master.volumeSizeLimitMB=64
+        -metricsPort=9327
     ports:
       - "8333:8333"
       - "8888:8888"
@@ -359,6 +388,93 @@ services:
         aws --endpoint-url http://seaweedfs:8333 s3api head-bucket --bucket gemfire-telemetry 2>/dev/null
         && echo "bucket gemfire-telemetry exists"
         || aws --endpoint-url http://seaweedfs:8333 s3 mb s3://gemfire-telemetry
+    networks: [gfmcp]
+
+  # ── Chunk 8: observability (make grafana) ────────────────────────────────────
+  # Metrics: Prometheus scrapes GemFire (:7070/metrics/), SeaweedFS, the workload.
+  # Logs:    Alloy ships container stdout + GemFire's log files + data/chaos.log into Loki.
+  # The MCP server and the forwarder have NO metrics endpoint: their numbers come from their log lines.
+  #   Grafana     http://localhost:13000  (admin / admin)
+  #   Prometheus  http://localhost:19090
+  #   Alloy       http://localhost:12345  (the log pipeline, drawn as a graph)
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./data/prometheus:/prometheus
+    # The image runs as "nobody"; root here so it can write to the bind-mounted ./data/prometheus
+    user: root
+    ports:
+      - "19090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [gfmcp]
+
+  loki:
+    profiles: [observability]
+    image: grafana/loki:3.6.22
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./observability/loki/loki.yml:/etc/loki/loki.yml:ro
+      - ./data/loki:/loki
+    # The image runs as uid 10001; root here so it can write to the bind-mounted ./data/loki
+    user: root
+    ports:
+      - "13100:3100"
+    # No healthcheck: the image is distroless (no shell, no wget/curl). Check it from your laptop:
+    #   curl localhost:13100/ready
+    networks: [gfmcp]
+
+  alloy:
+    profiles: [observability]
+    image: grafana/alloy:v1.22.0
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data     # remembers how far it read each file/container
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # to discover containers and read their logs
+      - ./data:/lab-data:ro                             # GemFire log files + chaos.log
+      - ./data/alloy:/var/lib/alloy/data
+    depends_on:
+      loki: { condition: service_started }
+    ports:
+      - "12345:12345"
+    networks: [gfmcp]
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/gfmcp-lab.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus: { condition: service_healthy }
+      loki: { condition: service_started }
+    ports:
+      - "13000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 20
     networks: [gfmcp]
 
 networks:

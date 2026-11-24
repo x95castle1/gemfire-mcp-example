@@ -1,0 +1,111 @@
+// Chunk 8: Grafana Alloy collects logs and pushes them to Loki. Three sources:
+//   1. stdout/stderr of every container in this compose project (MCP server audit log, forwarder stats, ...)
+//   2. the GemFire members' log FILES in ./data/gemfire (GemFire writes to files, not stdout)
+//   3. ./data/chaos.log from `make chaos` / `make heal` (chunk 6), used as Grafana annotations
+// See the pipeline live at http://localhost:12345 (each block below is a box in the graph).
+
+// ── 1. Container logs, via the Docker socket ─────────────────────────────────
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=gfmcp"]
+  }
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+  // service = the compose service name (mcp-server, telemetry-forwarder, workload, ...)
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.containers.output
+  relabel_rules = discovery.relabel.containers.rules
+  labels        = { job = "containers" }
+  forward_to    = [loki.write.local.receiver]
+}
+
+// ── 2. GemFire member log files ──────────────────────────────────────────────
+local.file_match "gemfire" {
+  path_targets = [{
+    __path__         = "/lab-data/gemfire/*/*.log",
+    // Rolled logs (<name>-01-02.log) are the live log renamed: tailing them too would ship lines twice.
+    __path_exclude__ = "/lab-data/gemfire/*/*-[0-9][0-9]-[0-9][0-9].log",
+    job              = "gemfire",
+  }]
+}
+
+loki.source.file "gemfire" {
+  targets    = local.file_match.gemfire.targets
+  forward_to = [loki.process.gemfire.receiver]
+}
+
+loki.process "gemfire" {
+  // A GemFire event starts with "[info 2026/11/24 20:15:57.961 GMT server-2 <thread> tid=0x..] ...";
+  // anything else (stack traces, Startup Configuration lines) belongs to the event above it.
+  stage.multiline {
+    firstline     = "^\\[(severe|fatal|error|warn|warning|info|config|fine|finer|finest|debug|trace) "
+    max_wait_time = "3s"
+  }
+  stage.regex {
+    expression = "^\\[(?P<level>[a-z]+) (?P<ts>\\d{4}/\\d{2}/\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}) GMT "
+  }
+  // member = the folder the file is in (early startup lines don't carry the member name yet)
+  stage.regex {
+    source     = "filename"
+    expression = "^/lab-data/gemfire/(?P<member>[^/]+)/"
+  }
+  // Use GemFire's own timestamp, not the time Alloy happened to read the line
+  stage.timestamp {
+    source   = "ts"
+    format   = "2006/01/02 15:04:05.000"
+    location = "UTC"
+  }
+  stage.labels {
+    values = { level = "", member = "" }
+  }
+  stage.label_drop {
+    values = ["filename"]
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+// ── 3. The chaos log (chunk 6) ───────────────────────────────────────────────
+local.file_match "chaos" {
+  path_targets = [{ __path__ = "/lab-data/chaos.log", job = "chaos" }]
+}
+
+loki.source.file "chaos" {
+  targets    = local.file_match.chaos.targets
+  forward_to = [loki.process.chaos.receiver]
+}
+
+loki.process "chaos" {
+  // "2026-11-24T19:16:27Z  pause  server-2"
+  stage.regex {
+    expression = "^(?P<ts>\\S+)\\s+(?P<action>\\S+)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339"
+  }
+  stage.labels {
+    values = { action = "" }
+  }
+  stage.label_drop {
+    values = ["filename"]
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+// ── Where it all goes ────────────────────────────────────────────────────────
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
