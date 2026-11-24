@@ -35,6 +35,8 @@ It identifies members by **file content**, not file names:
 
 It also creates `/var/gemfire/.forwarder.lock`: **exactly one forwarder per scan folder**. Two forwarders would ship conflicting state for the same member.
 
+Deep dive: [03-forwarder-scanning.md](03-forwarder-scanning.md) covers scan depth, hidden folders, symlinks, the 4 settings, and how to narrow what it scans.
+
 ## The store layout
 
 ```
