@@ -16,14 +16,13 @@ after:   forwarder ──PUT─────▶ s3://gemfire-telemetry/gfmcp ◀�
                                   (SeaweedFS on :8333)
 ```
 
-Both sides get identical settings from one YAML anchor in `compose.yaml`, which makes the contract between them explicit:
+Both `mcp-server` and `telemetry-forwarder` in `compose.yaml` carry these four identical lines. That's the whole contract between them: change one side and you have to change the other.
 
 ```yaml
-x-telemetry-store: &telemetry-store
-  GF_TELEMETRY_STORE: s3://gemfire-telemetry/gfmcp   # bucket + per-cluster prefix
-  GF_S3_ENDPOINT: http://seaweedfs:8333              # unset = real AWS S3
-  GF_S3_ACCESS_KEY: admin
-  GF_S3_SECRET_KEY: admin
+GF_TELEMETRY_STORE: s3://gemfire-telemetry/gfmcp   # bucket + per-cluster prefix
+GF_S3_ENDPOINT: http://seaweedfs:8333              # unset = real AWS S3
+GF_S3_ACCESS_KEY: admin
+GF_S3_SECRET_KEY: admin
 ```
 
 | Piece | What it does |

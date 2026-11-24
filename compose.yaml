@@ -10,53 +10,26 @@ name: gfmcp
 # (chunk 3) can scan them all.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Notes for every member command below (YAML `>` blocks cannot hold comments):
+# Every GemFire member below repeats the same image / environment / volumes / network on purpose:
+# each service reads top to bottom with nothing hidden in a shared YAML anchor.
+#
+# Notes for every member command (YAML `>` blocks cannot hold comments):
 #   --J=-XX:-UseZGC --J=-XX:+UseG1GC  gfsh adds ZGC by default; we switch to G1 so GC stats look familiar.
 #   --properties-file                 shared stats/log settings the MCP server depends on (see gemfire/gemfire.properties).
-x-gemfire: &gemfire
-  image: ${GEMFIRE_IMAGE:-gemfire/gemfire:10.3.4-jdk17}
-  environment:
-    ACCEPT_TERMS: "y"
-  volumes:
-    - ./data/gemfire:/var/gemfire
-    - ./gemfire:/config:ro
-  networks: [gfmcp]
-
-x-server: &server
-  <<: *gemfire
-  # No auto-restart: chaos scripts (chunk 6) kill servers on purpose and we want them to stay dead
-  restart: "no"
-  depends_on:
-    locator:
-      condition: service_healthy
-  healthcheck:
-    # Ask the locator's Management REST API whether this member (hostname = member name) is online.
-    # Not a raw connect to the cache-server port 40404: a probe that opens it and hangs up without
-    # speaking GemFire's protocol makes the server log "failed accepting client connection
-    # java.io.EOFException" every 5s, noise that ends up in the logs the MCP server searches.
-    test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"status\":\"online\"' <&3"]
-    interval: 5s
-    timeout: 3s
-    start_period: 60s
-    retries: 30
-
-# The ONE contract between the forwarder (writes) and the MCP server (reads): the same store.
-# Chunk 7: an S3 bucket on SeaweedFS. /gfmcp is this cluster's prefix: one prefix per cluster,
-# because nothing stops two clusters sharing a location from mixing their data.
-x-telemetry-store: &telemetry-store
-  GF_TELEMETRY_STORE: s3://gemfire-telemetry/gfmcp
-  # Any S3-compatible store: setting an endpoint also switches to path-style URLs (http://seaweedfs:8333/<bucket>/...)
-  GF_S3_ENDPOINT: http://seaweedfs:8333
-  GF_S3_ACCESS_KEY: admin
-  GF_S3_SECRET_KEY: admin
+#   working_dir                       the image's entrypoint runs the member in the foreground in the CURRENT
+#                                     directory, so working_dir decides where <member>.log / <member>.gfs land.
 
 services:
 
   locator:
-    <<: *gemfire
+    image: ${GEMFIRE_IMAGE:-gemfire/gemfire:10.3.4-jdk17}
+    environment:
+      ACCEPT_TERMS: "y"
+    volumes:
+      - ./data/gemfire:/var/gemfire
+      - ./gemfire:/config:ro
+    networks: [gfmcp]
     hostname: locator
-    # The image's entrypoint runs the member in the foreground in the CURRENT directory,
-    # so working_dir is what decides where locator.log / locator.gfs land.
     working_dir: /var/gemfire/locator
     restart: on-failure
     command: >
@@ -84,7 +57,27 @@ services:
       retries: 30
 
   server-1:
-    <<: *server
+    image: ${GEMFIRE_IMAGE:-gemfire/gemfire:10.3.4-jdk17}
+    environment:
+      ACCEPT_TERMS: "y"
+    volumes:
+      - ./data/gemfire:/var/gemfire
+      - ./gemfire:/config:ro
+    networks: [gfmcp]
+    # No auto-restart: chaos scripts (chunk 6) kill servers on purpose and we want them to stay dead
+    restart: "no"
+    depends_on:
+      locator: { condition: service_healthy }
+    healthcheck:
+      # Ask the locator's Management REST API whether this member (hostname = member name) is online.
+      # Not a raw connect to the cache-server port 40404: a probe that opens it and hangs up without
+      # speaking GemFire's protocol makes the server log "failed accepting client connection
+      # java.io.EOFException" every 5s, noise that ends up in the logs the MCP server searches.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"status\":\"online\"' <&3"]
+      interval: 5s
+      timeout: 3s
+      start_period: 60s
+      retries: 30
     hostname: server-1
     working_dir: /var/gemfire/server-1
     command: >
@@ -101,7 +94,22 @@ services:
         --critical-heap-percentage=90
 
   server-2:
-    <<: *server
+    image: ${GEMFIRE_IMAGE:-gemfire/gemfire:10.3.4-jdk17}
+    environment:
+      ACCEPT_TERMS: "y"
+    volumes:
+      - ./data/gemfire:/var/gemfire
+      - ./gemfire:/config:ro
+    networks: [gfmcp]
+    restart: "no"
+    depends_on:
+      locator: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"status\":\"online\"' <&3"]
+      interval: 5s
+      timeout: 3s
+      start_period: 60s
+      retries: 30
     hostname: server-2
     working_dir: /var/gemfire/server-2
     command: >
@@ -118,7 +126,22 @@ services:
         --critical-heap-percentage=90
 
   server-3:
-    <<: *server
+    image: ${GEMFIRE_IMAGE:-gemfire/gemfire:10.3.4-jdk17}
+    environment:
+      ACCEPT_TERMS: "y"
+    volumes:
+      - ./data/gemfire:/var/gemfire
+      - ./gemfire:/config:ro
+    networks: [gfmcp]
+    restart: "no"
+    depends_on:
+      locator: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"status\":\"online\"' <&3"]
+      interval: 5s
+      timeout: 3s
+      start_period: 60s
+      retries: 30
     hostname: server-3
     working_dir: /var/gemfire/server-3
     command: >
@@ -136,7 +159,13 @@ services:
 
   # One-shot: creates the demo regions (stored in cluster config), then exits 0.
   gemfire-init:
-    <<: *gemfire
+    image: ${GEMFIRE_IMAGE:-gemfire/gemfire:10.3.4-jdk17}
+    environment:
+      ACCEPT_TERMS: "y"
+    volumes:
+      - ./data/gemfire:/var/gemfire
+      - ./gemfire:/config:ro
+    networks: [gfmcp]
     restart: "no"
     working_dir: /tmp
     depends_on:
@@ -166,7 +195,14 @@ services:
       locator: { condition: service_healthy }
       s3-init: { condition: service_completed_successfully }
     environment:
-      <<: *telemetry-store
+      # The ONE contract between the forwarder (writes) and the MCP server (reads): the same store.
+      # An S3 bucket on SeaweedFS (chunk 7). /gfmcp is this cluster's prefix: one prefix per cluster,
+      # because nothing stops two clusters sharing a location from mixing their data.
+      GF_TELEMETRY_STORE: s3://gemfire-telemetry/gfmcp
+      # Any S3-compatible store: setting an endpoint also switches to path-style URLs (http://seaweedfs:8333/<bucket>/...)
+      GF_S3_ENDPOINT: http://seaweedfs:8333
+      GF_S3_ACCESS_KEY: admin
+      GF_S3_SECRET_KEY: admin
       # Default is 127.0.0.1 (loopback), which inside a container means unreachable from outside.
       SERVER_ADDRESS: 0.0.0.0
       # The locator's Management REST API. The server appends /management/v1 itself.
@@ -211,7 +247,11 @@ services:
       locator: { condition: service_healthy }
       s3-init: { condition: service_completed_successfully }
     environment:
-      <<: *telemetry-store
+      # Must match mcp-server's store settings exactly: same bucket, same prefix, same credentials.
+      GF_TELEMETRY_STORE: s3://gemfire-telemetry/gfmcp
+      GF_S3_ENDPOINT: http://seaweedfs:8333
+      GF_S3_ACCESS_KEY: admin
+      GF_S3_SECRET_KEY: admin
       # The folder holding the members' working directories (scanned up to 5 levels deep)
       GF_TELEMETRY_FORWARDER_SCAN_DIR: /var/gemfire
       GF_TELEMETRY_FORWARDER_INTERVAL: "10"
