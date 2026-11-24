@@ -1569,6 +1569,184 @@
           "queryType": "range"
         }
       ]
+    },
+    {
+      "type": "row",
+      "title": "SRE assistant  (chunk 9: our own MCP client; Prometheus \u2190 sre-assistant:8080/actuator/prometheus)",
+      "id": 34,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 89
+      },
+      "panels": []
+    },
+    {
+      "type": "bargauge",
+      "title": "MCP tool calls by tool and model (time range)",
+      "id": 35,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 0,
+        "y": 90
+      },
+      "description": "Which tools the models actually call. The GemFire MCP server's audit log can't show this (every call is POST /mcp); our client can.",
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sort_desc(sum by (tool, model) (increase(sre_tool_calls_seconds_count[$__range])))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "{{tool}} ({{model}})"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Questions and their duration",
+      "id": 36,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 7,
+        "x": 10,
+        "y": 90
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 8,
+            "showPoints": "always"
+          }
+        },
+        "overrides": []
+      },
+      "description": "Each point: the average duration of the questions answered in that minute, per model.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (model) (increase(sre_questions_seconds_sum[1m])) / sum by (model) (increase(sre_questions_seconds_count[1m])) > 0",
+          "range": true,
+          "instant": false,
+          "legendFormat": "{{model}}"
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Tokens by model (time range)",
+      "id": 37,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 7,
+        "x": 17,
+        "y": 90
+      },
+      "description": "From Spring AI's gen_ai.client.token.usage metric. Qwen tokens are free (your Mac); Claude tokens cost money.",
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (gen_ai_response_model, gen_ai_token_type) (increase(gen_ai_client_token_usage_total{gen_ai_token_type!=\"total\"}[$__range]))",
+          "range": false,
+          "instant": true,
+          "legendFormat": "{{gen_ai_response_model}} {{gen_ai_token_type}}"
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "Tool calls (sre.tool log lines)",
+      "id": 38,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 99
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"sre-assistant\"} |= \"sre.tool\"",
+          "queryType": "range"
+        }
+      ]
     }
   ]
 }

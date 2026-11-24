@@ -40,7 +40,7 @@ Note: even "is it healthy *now*?" (heap, GC, CPU, bucket redundancy) is judged f
 | 6 | Failure scenarios | break the cluster with `make chaos` (kill, stop, pause, isolate, locator-down, kill-majority), ask the AI what happened, `make heal` | [docs/06](docs/06-failures.md) |
 | 7 | S3 store (SeaweedFS) | swap the store without touching the cluster; browse it with `make seaweed` | [docs/07](docs/07-s3-store.md) |
 | 8 | Observability | `make grafana`: Prometheus + Loki + Grafana for the whole lab: GemFire's built-in metrics, the workload, SeaweedFS, and the MCP server + forwarder from their logs (they have no metrics endpoint). Chaos runs show up as annotations | [docs/08](docs/08-observability.md) |
-| 9 | SRE assistant | your own MCP client (Spring AI) with a **swappable model** (Claude by default, Qwen via local Ollama) and a JSON-RPC trace | |
+| 9 | SRE assistant | `make sre`: our own MCP client (Spring AI) on :18080. Pick Claude or Qwen (local Ollama) per question and watch every tool call and JSON-RPC message live | [docs/09](docs/09-sre-assistant.md) |
 | 10 | Security (optional) | OAuth + RBAC, a secured cluster, TLS | |
 | 11 | Runner mode (optional) | point the MCP server at `~/dev/gemfire-runner` | |
 
@@ -57,7 +57,8 @@ make seaweed               # browse the telemetry bucket (SeaweedFS UI)
 make inspector             # MCP Inspector web UI, already connected to the MCP server
 make load                  # start the workload app + pick a traffic scenario (needs Artifactory creds in .env)
 make chaos                 # break something on purpose (fzf menu); make heal puts it back
-make grafana               # Prometheus + Loki + Grafana, opens the lab dashboard (admin/admin, :13000)
+make grafana               # Prometheus + Loki + Grafana, opens the lab dashboard (:13000, no login)
+make sre                   # the SRE assistant, our own MCP client (needs ANTHROPIC_API_KEY in .env and/or Ollama)
 claude                     # Claude Code in this folder picks up .mcp.json (approve 'gemfire' once)
 make stop                  # stop (keeps ./data)      make clean  # stop + wipe ./data
 ```

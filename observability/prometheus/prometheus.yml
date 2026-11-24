@@ -38,6 +38,13 @@ scrape_configs:
     static_configs:
       - targets: ["seaweedfs:9327"]
 
+  # The SRE assistant (chunk 9): our sre_* metrics (questions, tool calls) + Spring AI's gen_ai_* (tokens, latency).
+  # DOWN when the assistant isn't running (make sre), which is fine.
+  - job_name: sre-assistant
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["sre-assistant:8080"]
+
   # The observability stack watching itself
   - job_name: loki
     static_configs:

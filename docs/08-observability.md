@@ -2,7 +2,7 @@
 
 ```bash
 make grafana        # starts Prometheus, Loki, Alloy, Grafana and opens the "GemFire MCP Lab" dashboard
-                    # Grafana     http://localhost:13000   admin / admin
+                    # Grafana     http://localhost:13000   (no login)
                     # Prometheus  http://localhost:19090   (Status → Target health: every scrape target)
                     # Alloy       http://localhost:12345   (the log pipeline, drawn as a graph)
 make load P=burst   # give it something to show

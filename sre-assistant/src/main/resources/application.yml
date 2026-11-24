@@ -1,0 +1,49 @@
+# Chunk 9: the SRE assistant, our own MCP client. http://localhost:18080
+server:
+  port: 8080
+
+spring:
+  application:
+    name: sre-assistant
+  threads:
+    virtual:
+      enabled: true
+  ai:
+    # ── MCP client: one connection, named "gemfire" ──────────────────────────────
+    mcp:
+      client:
+        name: gfmcp-sre-assistant        # sent to the server in "initialize" as clientInfo.name
+        version: 0.0.1
+        type: SYNC
+        request-timeout: 120s            # history tools can take a while on a cold cache
+        streamable-http:
+          connections:
+            gemfire:
+              url: ${GF_MCP_URL:http://mcp-server:8085}
+              endpoint: /mcp
+        # Basic auth: no property for headers, see McpClientConfig (a request customizer)
+
+    # ── Model 1: Claude (official Anthropic Java SDK underneath) ─────────────────
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+      chat:
+        model: ${CLAUDE_MODEL:claude-opus-5-5}
+        max-tokens: 16000
+
+    # ── Model 2: Qwen on a local Ollama (on your Mac, outside Docker) ────────────
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://host.docker.internal:11434}
+      init:
+        pull-model-strategy: never       # we never download 9 GB behind your back: `ollama pull` it yourself
+      chat:
+        model: ${OLLAMA_MODEL:qwen3:14b}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
+logging:
+  level:
+    sre.tool: INFO                       # one line per MCP tool call: shipped to Loki by Alloy (chunk 8)

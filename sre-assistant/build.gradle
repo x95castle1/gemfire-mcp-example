@@ -1,0 +1,41 @@
+plugins {
+    id 'java'
+    // Boot 4.2: Spring AI 2.1 is built on it. (The workload stays on 4.1 because Spring for GemFire
+    // targets 4.1; this app has no GemFire dependency at all, it only talks MCP.)
+    id 'org.springframework.boot' version '4.2.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.example.gfmcp'
+version = '0.0.1'
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+repositories {
+    mavenCentral()      // everything here is public: no Artifactory credentials needed
+}
+
+dependencyManagement {
+    imports {
+        mavenBom 'org.springframework.ai:spring-ai-bom:2.1.0'
+    }
+}
+
+dependencies {
+    // MCP client (official MCP Java SDK underneath): connects to the GemFire MCP server over
+    // Streamable HTTP and turns its tools into Spring AI ToolCallbacks
+    implementation 'org.springframework.ai:spring-ai-starter-mcp-client'
+    // The two models: Claude (official Anthropic Java SDK underneath) and Qwen via a local Ollama
+    implementation 'org.springframework.ai:spring-ai-starter-model-anthropic'
+    implementation 'org.springframework.ai:spring-ai-starter-model-ollama'
+
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'   // token/latency metrics for chunk 8's Grafana
+}
+
+tasks.named('bootJar') {
+    archiveFileName = 'sre-assistant.jar'
+}

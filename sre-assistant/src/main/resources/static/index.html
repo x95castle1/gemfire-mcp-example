@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GemFire SRE assistant</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1d2330; --muted: #677086; --line: #e2e5ec;
+    --accent: #2f6fdb; --ok: #1f8a4c; --bad: #c8382d; --warn: #b7791f;
+    --rpc: #6b4fbb; --tool: #2f6fdb; --result: #1f8a4c;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12151b; --panel: #1a1f28; --ink: #e6e9ef; --muted: #8b93a7; --line: #2a303c;
+            --accent: #6d9cff; --ok: #4cc27f; --bad: #ff6b5e; --warn: #e0a54a;
+            --rpc: #a68cff; --tool: #6d9cff; --result: #4cc27f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--ink); }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .models { margin-left: auto; display: flex; gap: 10px; font-size: 13px; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+  .chip.on::before { content: "● "; color: var(--ok); }
+  .chip.off::before { content: "● "; color: var(--bad); }
+  main { display: grid; grid-template-columns: minmax(360px, 5fr) 6fr; gap: 16px; padding: 16px 24px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .pick { display: flex; gap: 8px; margin-bottom: 10px; }
+  .pick label { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+  .pick input { margin-right: 6px; }
+  .pick label.disabled { opacity: .5; }
+  .pick small { display: block; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  textarea { width: 100%; min-height: 84px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: var(--bg); color: var(--ink); resize: vertical; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  button { font: inherit; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 8px; padding: 7px 16px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; color: var(--accent); font-size: 13px; padding: 4px 10px; }
+  .samples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .hint { color: var(--warn); font-size: 13px; margin-top: 6px; }
+  .stats { display: flex; gap: 18px; font-size: 13px; color: var(--muted); margin: 14px 0 6px; flex-wrap: wrap; }
+  .stats b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .answer { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; overflow-wrap: anywhere; }
+  .answer pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow: auto; font-size: 13px; }
+  .answer code { font-family: var(--mono); font-size: 13px; }
+  .answer table { border-collapse: collapse; font-size: 13px; }
+  .answer td, .answer th { border: 1px solid var(--line); padding: 3px 8px; text-align: left; }
+  .answer h1, .answer h2, .answer h3 { font-size: 16px; text-transform: none; letter-spacing: 0; color: var(--ink); margin: 14px 0 6px; }
+  .error { color: var(--bad); white-space: pre-wrap; }
+  .trace { display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 150px); overflow: auto; }
+  .ev { border-left: 3px solid var(--line); padding: 4px 10px; font-size: 13px; }
+  .ev .t { color: var(--muted); font-family: var(--mono); font-size: 12px; margin-right: 8px; font-variant-numeric: tabular-nums; }
+  .ev.tool_call { border-color: var(--tool); }
+  .ev.tool_result { border-color: var(--result); }
+  .ev.tool_result.failed { border-color: var(--bad); }
+  .ev.jsonrpc_out { border-color: var(--rpc); }
+  .ev.error { border-color: var(--bad); }
+  .ev summary { cursor: pointer; }
+  .ev pre { margin: 6px 0 2px; padding: 8px; background: var(--bg); border-radius: 6px; overflow: auto; max-height: 360px; font: 12px/1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tag { font-family: var(--mono); font-size: 12px; padding: 0 6px; border-radius: 4px; border: 1px solid currentColor; }
+  .tag.rpc { color: var(--rpc); } .tag.tool { color: var(--tool); } .tag.res { color: var(--result); }
+  .legend { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .empty { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GemFire SRE assistant</h1>
+  <span class="sub">our own MCP client · tools from the GemFire MCP server · chunk 9</span>
+  <div class="models" id="models"></div>
+</header>
+<main>
+  <section>
+    <h2>Ask</h2>
+    <div class="pick" id="pick">
+      <label id="lbl-claude"><input type="radio" name="model" value="claude" checked>Claude<small id="id-claude"></small></label>
+      <label id="lbl-qwen"><input type="radio" name="model" value="qwen">Qwen (local Ollama)<small id="id-qwen"></small></label>
+    </div>
+    <div class="hint" id="hint"></div>
+    <textarea id="q" placeholder="e.g. What happened to the cluster in the last 15 minutes?"></textarea>
+    <div class="row">
+      <button id="ask">Investigate</button>
+      <span class="empty">⌘/Ctrl + Enter</span>
+    </div>
+    <div class="samples" id="samples"></div>
+    <div class="stats" id="stats"></div>
+    <div class="answer" id="answer"><span class="empty">The answer appears here. On the right: every step, live.</span></div>
+  </section>
+  <section>
+    <h2>Trace</h2>
+    <div class="legend">
+      <span class="tag tool">tool_call</span> the model chose a tool ·
+      <span class="tag rpc">JSON-RPC →</span> what our client sent the MCP server ·
+      <span class="tag res">result</span> what came back (to the model)
+    </div>
+    <div class="trace" id="trace">
+      <details class="ev" id="session"><summary>MCP session set up at startup (initialize, tools/list) …</summary><div id="session-body" class="empty">loading</div></details>
+      <details class="ev" id="toolsdef"><summary>The tools as the model sees them (from tools/list) …</summary><div id="tools-body" class="empty">loading</div></details>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const SAMPLES = [
+  "Is the cluster healthy right now?",
+  "What happened to the GemFire cluster in the last 15 minutes? Give me a timeline.",
+  "What's the put rate on each server over the last 10 minutes? Is the load balanced?",
+  "Has anything unusual happened to heap in the last 15 minutes?",
+  "Which members are in the cluster, and are all regions fully redundant?",
+];
+let models = {};
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function pretty(s) { try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return String(s); } }
+
+// A deliberately small markdown renderer: headings, bold, inline code, code blocks, lists, tables.
+function md(text) {
+  const blocks = String(text).split(/```/);
+  return blocks.map((b, i) => {
+    if (i % 2 === 1) return "<pre><code>" + esc(b.replace(/^[a-z]*\n/, "")) + "</code></pre>";
+    const lines = esc(b).split("\n");
+    let out = "", inList = false, table = [];
+    const inline = (l) => l.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+    const flushTable = () => {
+      if (!table.length) return;
+      const rows = table.filter(r => !/^\|?\s*:?-{2,}/.test(r));
+      out += "<table>" + rows.map((r, ri) => "<tr>" + r.replace(/^\||\|$/g, "").split("|")
+        .map(c => ri === 0 ? "<th>" + inline(c.trim()) + "</th>" : "<td>" + inline(c.trim()) + "</td>").join("") + "</tr>").join("") + "</table>";
+      table = [];
+    };
+    for (const l of lines) {
+      if (/^\s*\|.*\|\s*$/.test(l)) { table.push(l.trim()); continue; } else flushTable();
+      const h = l.match(/^(#{1,4})\s+(.*)/);
+      const li = l.match(/^\s*(?:[-*]|\d+\.)\s+(.*)/);
+      if (li) { if (!inList) { out += "<ul>"; inList = true; } out += "<li>" + inline(li[1]) + "</li>"; continue; }
+      if (inList) { out += "</ul>"; inList = false; }
+      if (h) out += "<h3>" + inline(h[2]) + "</h3>";
+      else if (l.trim()) out += "<p>" + inline(l) + "</p>";
+    }
+    flushTable();
+    if (inList) out += "</ul>";
+    return out;
+  }).join("");
+}
+
+async function loadModels() {
+  models = await (await fetch("/api/models")).json();
+  $("models").innerHTML = ["claude", "qwen"].map(k =>
+    `<span class="chip ${models[k].available ? "on" : "off"}" title="${esc(models[k].hint)}">${k} · ${esc(models[k].model)}</span>`).join("");
+  for (const k of ["claude", "qwen"]) {
+    $("id-" + k).textContent = models[k].model;
+    $("lbl-" + k).classList.toggle("disabled", !models[k].available);
+  }
+  showHint();
+}
+function selected() { return document.querySelector("input[name=model]:checked").value; }
+function showHint() { const m = models[selected()]; $("hint").textContent = m && !m.available ? m.hint : ""; }
+document.querySelectorAll("input[name=model]").forEach(r => r.addEventListener("change", showHint));
+
+async function loadSession() {
+  const log = await (await fetch("/api/session")).json();
+  $("session-body").innerHTML = log.length ? log.map(e =>
+    `<div><span class="tag rpc">${esc(e.httpMethod)} /mcp</span> <span class="t">${esc(e.at)}</span><pre>${esc(pretty(e.body) || "(no body)")}</pre></div>`).join("")
+    : "Nothing yet: the MCP client connects on first use.";
+}
+
+SAMPLES.forEach(s => { const b = document.createElement("button"); b.className = "ghost"; b.textContent = s; b.onclick = () => { $("q").value = s; }; $("samples").appendChild(b); });
+
+function addEvent(ev) {
+  const t = `<span class="t">+${(ev.ms / 1000).toFixed(1)}s</span>`;
+  let html = "";
+  switch (ev.type) {
+    case "question": html = `${t}<b>Question</b> to <b>${esc(ev.model)}</b> (${esc(ev.modelId)})`; break;
+    case "tools": html = `${t}${ev.count} MCP tools offered to the model: <span class="t">${esc(ev.names.join(", "))}</span>`; break;
+    case "tool_call": html = `<details open><summary>${t}<span class="tag tool">tool_call #${ev.seq}</span> <b>${esc(ev.tool)}</b></summary><pre>${esc(pretty(ev.arguments))}</pre></details>`; break;
+    case "jsonrpc_out": html = `<details><summary>${t}<span class="tag rpc">JSON-RPC → ${esc(ev.httpMethod)} /mcp</span> ${esc(rpcMethod(ev.body))}</summary><pre>${esc(pretty(ev.body) || "(no body)")}</pre></details>`; break;
+    case "tool_result": html = `<details><summary>${t}<span class="tag res">result #${ev.seq}</span> ${esc(ev.tool)} · ${ev.toolMs} ms · ${ev.chars.toLocaleString()} chars ${ev.ok ? "" : "· <b>failed</b>"}</summary><pre>${esc(pretty(ev.result))}</pre></details>`; break;
+    case "answer": html = `${t}<b>Answer</b> (${ev.text.length.toLocaleString()} chars)`; $("answer").innerHTML = md(ev.text) || '<span class="empty">(empty answer)</span>'; break;
+    case "usage": html = `${t}<b>Done</b>`; stats(ev); break;
+    case "error": html = `${t}<span class="error">${esc(ev.message)}</span>`; $("answer").innerHTML = `<div class="error">${esc(ev.message)}</div>`; break;
+    default: return;
+  }
+  const div = document.createElement("div");
+  div.className = "ev " + ev.type + (ev.type === "tool_result" && !ev.ok ? " failed" : "");
+  div.innerHTML = html;
+  $("trace").appendChild(div);
+  div.scrollIntoView({ block: "nearest" });
+  if (ev.type === "tool_call") liveStats(ev);
+}
+function rpcMethod(body) { try { const j = JSON.parse(body); return j.method + (j.params && j.params.name ? " · " + j.params.name : ""); } catch { return ""; } }
+
+let started = 0, timer = null, calls = 0;
+function liveStats(ev) { if (ev) calls = ev.seq; $("stats").innerHTML = `<span>elapsed <b>${((Date.now() - started) / 1000).toFixed(0)}s</b></span><span>tool calls <b>${calls}</b></span>`; }
+function stats(u) {
+  clearInterval(timer);
+  const f = (n) => n == null ? "?" : Number(n).toLocaleString();
+  $("stats").innerHTML = `<span>time <b>${((Date.now() - started) / 1000).toFixed(1)}s</b></span><span>tool calls <b>${u.toolCalls}</b></span>` +
+    `<span>tokens in <b>${f(u.promptTokens)}</b></span><span>out <b>${f(u.completionTokens)}</b></span><span>model <b>${esc(u.modelId || u.model)}</b></span>`;
+}
+
+async function ask() {
+  const question = $("q").value.trim();
+  if (!question) return;
+  $("ask").disabled = true;
+  $("answer").innerHTML = '<span class="empty">Investigating… (this can take a minute or two)</span>';
+  document.querySelectorAll(".trace .ev:not(#session):not(#toolsdef)").forEach(e => e.remove());
+  started = Date.now(); calls = 0; liveStats(); clearInterval(timer); timer = setInterval(() => liveStats(), 1000);
+  try {
+    const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, model: selected() }) });
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+        const data = chunk.split("\n").filter(l => l.startsWith("data:")).map(l => l.slice(5)).join("\n");
+        if (data) addEvent(JSON.parse(data));
+      }
+    }
+  } catch (e) {
+    addEvent({ type: "error", ms: Date.now() - started, message: String(e) });
+  } finally {
+    clearInterval(timer); $("ask").disabled = false; loadSession();
+  }
+}
+$("ask").onclick = ask;
+$("q").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) ask(); });
+async function loadTools() {
+  const defs = await (await fetch("/api/tools")).json();
+  $("tools-body").innerHTML = defs.map(d => `<details><summary><b>${esc(d.name)}</b> <span class="t">${esc((d.description || "").split("\n")[0].slice(0, 120))}</span></summary><pre>${esc(d.description)}\n\ninput schema:\n${esc(pretty(d.inputSchema))}</pre></details>`).join("");
+  loadSession();
+}
+loadModels(); loadTools(); setInterval(loadModels, 30000);
+</script>
+</body>
+</html>
