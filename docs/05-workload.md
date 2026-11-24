@@ -40,7 +40,7 @@ workload/
 - **No client statistics archive, on purpose.** A client `.gfs` in `./data/gemfire` would be shipped by the forwarder like a member's, and `assess_cluster_health`'s `members_present` check would flag "a member recorded stats but isn't in the cluster now".
 - **Artifactory credentials** come from `.env` as **BuildKit secrets** (`secrets:` in `compose.yaml`, `RUN --mount=type=secret` in the Dockerfile): available to the Gradle step, never stored in an image layer.
 - **Port 18090** on your laptop, because gemfire-runner's `goodbye-world` already uses 8090.
-- `/actuator/prometheus` is exposed for chunk 10 (observability).
+- `/actuator/prometheus` is exposed for chunk 8 (observability).
 
 ## Bugs and noise we hit
 

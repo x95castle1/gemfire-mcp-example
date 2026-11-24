@@ -15,7 +15,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,prometheus   # /actuator/prometheus feeds chunk 10 (observability)
+        include: health,prometheus   # /actuator/prometheus feeds chunk 8 (observability)
 
 workload:
   # Scenario at startup; change it at runtime with `make load` (POST /scenario/{name})

@@ -74,7 +74,7 @@ Since you can't filter by pattern, you choose the files by choosing the folder:
 
 `/var/gemfire` holds just the 4 member folders (`locator`, `server-1..3`), so the defaults are exactly right. The locator is included like any other member: `locator/locator.gfs` and `locator/locator.log` end up under `gfmcp/locator/` in the store.
 
-This becomes relevant in **chunk 8 (runner mode)**: gemfire-runner's data folder has other things in it, and we'll want to point the forwarder at just the member folders.
+This becomes relevant in **chunk 11 (runner mode, optional)**: gemfire-runner's data folder has other things in it, and we'll want to point the forwarder at just the member folders.
 
 ## Look for yourself
 

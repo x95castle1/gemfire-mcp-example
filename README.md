@@ -39,10 +39,10 @@ Note: even "is it healthy *now*?" (heap, GC, CPU, bucket redundancy) is judged f
 | 5 | Workload generator | drive traffic with `make load` (steady, burst, hot-key, heap-hog…) and watch `cache_ops_rate` / `put_latency` / heap move | [docs/05](docs/05-workload.md) |
 | 6 | Failure scenarios | break the cluster with `make chaos` (kill, stop, pause, isolate, locator-down, kill-majority), ask the AI what happened, `make heal` | [docs/06](docs/06-failures.md) |
 | 7 | S3 store (SeaweedFS) | swap the store without touching the cluster; browse it with `make seaweed` | [docs/07](docs/07-s3-store.md) |
-| 8 | Runner mode | point the MCP server at `~/dev/gemfire-runner` | |
+| 8 | Observability | Prometheus + Grafana for the lab itself: GemFire member metrics, the MCP server, the forwarder's ship stats, SeaweedFS, plus the MCP server's audit log (`gf-mcp.audit`) | |
 | 9 | SRE assistant | your own MCP client (Spring AI) with a **swappable model** (Claude by default, Qwen via local Ollama) and a JSON-RPC trace | |
-| 10 | Observability | Prometheus + Grafana for the lab itself: GemFire member metrics, the MCP server, the forwarder's ship stats, SeaweedFS, plus the MCP server's audit log (`gf-mcp.audit`) | |
-| 11 | Security (stretch) | OAuth + RBAC, a secured cluster, TLS | |
+| 10 | Security (optional) | OAuth + RBAC, a secured cluster, TLS | |
+| 11 | Runner mode (optional) | point the MCP server at `~/dev/gemfire-runner` | |
 
 ## Quickstart
 
