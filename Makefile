@@ -7,7 +7,7 @@ COMPOSE := docker compose
 # --profile '*' = every profile, so stop/status/logs also see optional services
 ALL := $(COMPOSE) --profile '*'
 
-.PHONY: help start stop clean status logs tools call seaweed inspector load
+.PHONY: help start stop clean status logs tools call seaweed inspector load chaos heal
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z]+:.*## / { printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -69,3 +69,9 @@ load: ## Drive GemFire traffic: pick a scenario (fzf), or make load P=burst
 	[ -n "$$p" ] || exit 0; \
 	echo "curl -X POST http://localhost:18090/scenario/$$p"; \
 	curl -sS -X POST http://localhost:18090/scenario/$$p | jq .
+
+chaos: ## Break something: pick a failure (fzf), or make chaos C=kill M=server-2
+	@if [ -z "$(C)" ]; then scripts/chaos.sh pick; else scripts/chaos.sh $(C) $(M); fi
+
+heal: ## Undo all chaos: unpause, reconnect, start stopped members, wait for healthy
+	@scripts/chaos.sh heal

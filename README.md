@@ -37,7 +37,7 @@ Note: even "is it healthy *now*?" (heap, GC, CPU, bucket redundancy) is judged f
 | 3 | Telemetry pipeline (file store) | query stats history, search logs, see real health | [docs/03](docs/03-telemetry.md) |
 | 4 | Off-the-shelf clients | browse tools in MCP Inspector (`make inspector`), ask Claude Code about the cluster | [docs/04](docs/04-clients.md) |
 | 5 | Workload generator | drive traffic with `make load` (steady, burst, hot-key, heap-hog…) and watch `cache_ops_rate` / `put_latency` / heap move | [docs/05](docs/05-workload.md) |
-| 6 | Failure scenarios | kill/pause a server and ask the AI what happened | |
+| 6 | Failure scenarios | break the cluster with `make chaos` (kill, stop, pause, isolate, locator-down, kill-majority), ask the AI what happened, `make heal` | [docs/06](docs/06-failures.md) |
 | 7 | S3 store (SeaweedFS) | swap the store without touching the cluster; browse it with `make seaweed` | [docs/07](docs/07-s3-store.md) |
 | 8 | Runner mode | point the MCP server at `~/dev/gemfire-runner` | |
 | 9 | SRE assistant | your own MCP client (Spring AI) with a **swappable model** (Claude by default, Qwen via local Ollama) and a JSON-RPC trace | |
@@ -56,6 +56,7 @@ make call T=list_members   # or call one directly
 make seaweed               # browse the telemetry bucket (SeaweedFS UI)
 make inspector             # MCP Inspector web UI, already connected to the MCP server
 make load                  # start the workload app + pick a traffic scenario (needs Artifactory creds in .env)
+make chaos                 # break something on purpose (fzf menu); make heal puts it back
 claude                     # Claude Code in this folder picks up .mcp.json (approve 'gemfire' once)
 make stop                  # stop (keeps ./data)      make clean  # stop + wipe ./data
 ```

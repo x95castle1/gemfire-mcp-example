@@ -69,11 +69,14 @@ services:
     depends_on:
       locator: { condition: service_healthy }
     healthcheck:
-      # Ask the locator's Management REST API whether this member (hostname = member name) is online.
+      # Ask the locator's Management REST API whether this member (hostname = member name) has its
+      # cache server running ("cacheServerInfo":[{..."running":true}]), the last thing a member starts.
+      # Not "status":"online": after an auto-reconnect (chunk 6, pause) GemFire leaves the status at
+      # "starting" for good, although the member is fully back.
       # Not a raw connect to the cache-server port 40404: a probe that opens it and hangs up without
       # speaking GemFire's protocol makes the server log "failed accepting client connection
       # java.io.EOFException" every 5s, noise that ends up in the logs the MCP server searches.
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"status\":\"online\"' <&3"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"running\":true' <&3"]
       interval: 5s
       timeout: 3s
       start_period: 60s
@@ -105,7 +108,7 @@ services:
     depends_on:
       locator: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"status\":\"online\"' <&3"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"running\":true' <&3"]
       interval: 5s
       timeout: 3s
       start_period: 60s
@@ -137,7 +140,7 @@ services:
     depends_on:
       locator: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"status\":\"online\"' <&3"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"running\":true' <&3"]
       interval: 5s
       timeout: 3s
       start_period: 60s
