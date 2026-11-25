@@ -291,7 +291,7 @@ services:
     networks: [gfmcp]
 
   # ── Chunk 5: workload generator (Spring Boot 4.1 GemFire client) ─────────────
-  # make load  ->  pick a scenario (steady, burst, hot-key, heap-hog, release-heap, stop)
+  # make load  ->  pick a scenario (steady, heap-hog, release-heap, stop); timed load tests: make select-load-test (k6)
   # Control API on http://localhost:18090 (/status, /scenarios, POST /scenario/{name})
   # (host port 18090: gemfire-runner's goodbye-world already owns 8090)
   workload:
@@ -390,6 +390,34 @@ services:
         || aws --endpoint-url http://seaweedfs:8333 s3 mb s3://gemfire-telemetry
     networks: [gfmcp]
 
+  # ── Chunk 11: load tests with k6 (make select-load-test) ────────────────────────────
+  # One-shot: `make select-load-test T=spike` runs k6/spike.js and exits. k6 calls the workload's /ops/*
+  # endpoints (one real GemFire operation per request), pushes its metrics to Prometheus
+  # (remote write: Prometheus doesn't scrape k6), and saves an HTML report in data/loadtest/.
+  # While a test runs, its live dashboard is on http://localhost:5665.
+  k6:
+    profiles: [loadtest]
+    image: grafana/k6:2.3.0
+    depends_on:
+      workload: { condition: service_healthy }
+    environment:
+      BASE_URL: http://workload:8090
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      # Latency ("trend") metrics: which statistics to send, as k6_http_req_duration_p95 etc.
+      K6_PROMETHEUS_RW_TREND_STATS: p(50),p(95),p(99),max
+      # Mark the series stale at the end, so Grafana lines stop when the test does
+      K6_PROMETHEUS_RW_STALE_MARKERS: "true"
+      K6_WEB_DASHBOARD: "true"
+      K6_WEB_DASHBOARD_HOST: 0.0.0.0    # listen on all interfaces, so the published port 5665 reaches it
+    volumes:
+      - ./k6:/scripts:ro
+      - ./data/loadtest:/reports
+    # The image runs as uid 12345; root here so it can write reports into the bind-mounted ./data/loadtest
+    user: root
+    ports:
+      - "5665:5665"      # k6's live web dashboard (only while a test runs)
+    networks: [gfmcp]
+
   # ── Chunk 9: SRE assistant, our own MCP client (make sre) ────────────────────
   # http://localhost:18080 : ask a question, pick Claude or Qwen, watch every tool call and JSON-RPC
   # message live. Claude needs ANTHROPIC_API_KEY in .env; Qwen needs Ollama running on your Mac
@@ -436,6 +464,7 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=7d
+      - --web.enable-remote-write-receiver   # chunk 11: k6 pushes its metrics here (it isn't scraped)
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./data/prometheus:/prometheus

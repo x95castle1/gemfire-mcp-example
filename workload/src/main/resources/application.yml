@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: workload
+  threads:
+    virtual:
+      enabled: true   # chunk 11: k6 sends hundreds of concurrent requests; a virtual thread each, not a pool of 200
   data:
     gemfire:
       name: workload

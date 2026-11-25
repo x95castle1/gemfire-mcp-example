@@ -5,7 +5,7 @@ make grafana-ui     # starts Prometheus, Loki, Alloy, Grafana and opens the "Gem
                     # Grafana     http://localhost:13000   (no login)
                     # Prometheus  http://localhost:19090   (Status → Target health: every scrape target)
                     # Alloy       http://localhost:12345   (the log pipeline, drawn as a graph)
-make load P=burst   # give it something to show
+make select-load-test T=spike   # give it something to show
 make chaos          # red markers appear on every panel at each kill / pause / heal
 ```
 

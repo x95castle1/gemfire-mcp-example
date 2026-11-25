@@ -45,6 +45,38 @@
           "queryType": "range"
         },
         "tagKeys": "action"
+      },
+      {
+        "name": "Load tests (make select-load-test)",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "enable": true,
+        "iconColor": "blue",
+        "expr": "{job=\"load\"}",
+        "target": {
+          "refId": "Load",
+          "expr": "{job=\"load\"}",
+          "queryType": "range"
+        },
+        "tagKeys": "action",
+        "textFormat": "{{action}}"
+      },
+      {
+        "name": "Workload scenario switches (make load)",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "enable": true,
+        "iconColor": "purple",
+        "expr": "{service=\"workload\"} |= \"Scenario: \"",
+        "target": {
+          "refId": "Scen",
+          "expr": "{service=\"workload\"} |= \"Scenario: \"",
+          "queryType": "range"
+        }
       }
     ]
   },
@@ -806,6 +838,362 @@
     },
     {
       "type": "row",
+      "title": "Load tests (k6)  (chunk 11: make select-load-test; k6 pushes to Prometheus while a test runs)",
+      "id": 39,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests / s: k6 vs the workload client vs GemFire",
+      "id": 40,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "description": "The same traffic counted three times: by k6, by the client, and by the servers. The background traffic is paused during a test, so the lines should track each other. Server counts use each member's cache-wide stats (stat=\"cachePerfStats\"): puts aren't counted per region there. The server line is a 1-minute average, so it rounds off a short spike.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(k6_http_reqs_total[1m]))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "k6 HTTP requests"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(workload_op_seconds_count{source=\"k6\"}[1m]))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "workload \u2192 GemFire calls (source=k6)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(gemfire_gets{category=\"CachePerfStats\",stat=\"cachePerfStats\",node=~\"server.*\"}[1m])) + sum(rate(gemfire_puts{category=\"CachePerfStats\",stat=\"cachePerfStats\",node=~\"server.*\"}[1m]))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "GemFire servers: gets + puts"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency p95: k6 vs the workload client vs GemFire server",
+      "id": 41,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "description": "Each layer adds its own time: GemFire's server-side put (avg; it keeps no percentiles), the client's call (network + server), k6's HTTP request (+ Tomcat + JSON).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (name) (k6_http_req_duration_p95)",
+          "range": true,
+          "instant": false,
+          "legendFormat": "k6 p95 {{name}} (HTTP + app + GemFire)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, op) (rate(workload_op_seconds_bucket{source=\"k6\"}[1m])))",
+          "range": true,
+          "instant": false,
+          "legendFormat": "client p95 {{op}} (network + GemFire)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(gemfire_putTime{category=\"CachePerfStats\",stat=\"cachePerfStats\",node=~\"server.*\"}[1m])) / sum(rate(gemfire_puts{category=\"CachePerfStats\",stat=\"cachePerfStats\",node=~\"server.*\"}[1m])) / 1e9",
+          "range": true,
+          "instant": false,
+          "legendFormat": "server avg put (inside GemFire)"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(gemfire_getTime{category=\"CachePerfStats\",stat=\"cachePerfStats\",node=~\"server.*\"}[1m])) / sum(rate(gemfire_gets{category=\"CachePerfStats\",stat=\"cachePerfStats\",node=~\"server.*\"}[1m])) / 1e9",
+          "range": true,
+          "instant": false,
+          "legendFormat": "server avg get (inside GemFire)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "k6 failures and checks",
+      "id": 42,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 39
+      },
+      "description": "Thresholds fail the test above 1% failed requests.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(k6_http_req_failed_rate)",
+          "range": true,
+          "instant": false,
+          "legendFormat": "failed requests"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "1 - max(k6_checks_rate)",
+          "range": true,
+          "instant": false,
+          "legendFormat": "failed checks"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "k6 virtual users",
+      "id": 43,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 39
+      },
+      "description": "Arrival-rate tests add VUs when responses slow down, to keep the rate. VUs climbing = the system is getting slower.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(k6_vus)",
+          "range": true,
+          "instant": false,
+          "legendFormat": "VUs in use"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(k6_vus_max)",
+          "range": true,
+          "instant": false,
+          "legendFormat": "VUs allocated"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "k6 p99 and max",
+      "id": 44,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 39
+      },
+      "description": "The tail: what the unluckiest requests saw.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (name) (k6_http_req_duration_p99)",
+          "range": true,
+          "instant": false,
+          "legendFormat": "p99 {{name}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (name) (k6_http_req_duration_max)",
+          "range": true,
+          "instant": false,
+          "legendFormat": "max {{name}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
       "title": "GemFire MCP server  (Loki \u2190 the gf-mcp.audit log: it has no metrics endpoint)",
       "id": 15,
       "collapsed": false,
@@ -813,7 +1201,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 47
       },
       "panels": []
     },
@@ -829,7 +1217,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 31
+        "y": 48
       },
       "fieldConfig": {
         "defaults": {
@@ -881,7 +1269,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 31
+        "y": 48
       },
       "fieldConfig": {
         "defaults": {
@@ -931,7 +1319,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 31
+        "y": 48
       },
       "fieldConfig": {
         "defaults": {
@@ -982,7 +1370,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 56
       },
       "options": {
         "showTime": true,
@@ -1015,7 +1403,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 39
+        "y": 56
       },
       "options": {
         "showTime": true,
@@ -1046,7 +1434,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 65
       },
       "panels": []
     },
@@ -1062,7 +1450,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 49
+        "y": 66
       },
       "fieldConfig": {
         "defaults": {
@@ -1112,7 +1500,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 49
+        "y": 66
       },
       "fieldConfig": {
         "defaults": {
@@ -1178,7 +1566,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 49
+        "y": 66
       },
       "fieldConfig": {
         "defaults": {
@@ -1235,7 +1623,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 49
+        "y": 66
       },
       "fieldConfig": {
         "defaults": {
@@ -1285,7 +1673,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 74
       },
       "panels": []
     },
@@ -1301,7 +1689,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 58
+        "y": 75
       },
       "fieldConfig": {
         "defaults": {
@@ -1352,7 +1740,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 58
+        "y": 75
       },
       "fieldConfig": {
         "defaults": {
@@ -1402,7 +1790,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 58
+        "y": 75
       },
       "fieldConfig": {
         "defaults": {
@@ -1449,7 +1837,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 83
       },
       "panels": []
     },
@@ -1465,7 +1853,7 @@
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 67
+        "y": 84
       },
       "fieldConfig": {
         "defaults": {
@@ -1516,7 +1904,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 67
+        "y": 84
       },
       "options": {
         "showTime": true,
@@ -1549,7 +1937,7 @@
         "h": 14,
         "w": 24,
         "x": 0,
-        "y": 75
+        "y": 92
       },
       "options": {
         "showTime": true,
@@ -1579,7 +1967,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 89
+        "y": 106
       },
       "panels": []
     },
@@ -1595,7 +1983,7 @@
         "h": 9,
         "w": 10,
         "x": 0,
-        "y": 90
+        "y": 107
       },
       "description": "Which tools the models actually call. The GemFire MCP server's audit log can't show this (every call is POST /mcp); our client can.",
       "options": {
@@ -1642,7 +2030,7 @@
         "h": 9,
         "w": 7,
         "x": 10,
-        "y": 90
+        "y": 107
       },
       "fieldConfig": {
         "defaults": {
@@ -1682,7 +2070,7 @@
         "h": 9,
         "w": 7,
         "x": 17,
-        "y": 90
+        "y": 107
       },
       "description": "From Spring AI's gen_ai.client.token.usage metric. Qwen tokens are free (your Mac); Claude tokens cost money.",
       "options": {
@@ -1728,7 +2116,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 99
+        "y": 116
       },
       "options": {
         "showTime": true,

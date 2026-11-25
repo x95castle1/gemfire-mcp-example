@@ -3,6 +3,7 @@
 ```bash
 make load                 # starts the app if needed, then pick a scenario from a menu
 make load P=heap-hog      # or name it
+make load P=stop D=2m     # for 2 minutes, then back to what was running
 curl -s localhost:18090/status | jq      # what it's doing right now
 make logs S=workload
 ```
@@ -14,11 +15,11 @@ An idle cluster gives the MCP server nothing to find. `workload/` is a small **S
 | Scenario | What it does | What to look for over MCP |
 |---|---|---|
 | `steady` (default) | ~200 ops/s, 70% gets / 30% puts, 1 KB values over 10k keys in Customers + Orders | `query_stat` with `cache_ops_rate`, `put_rate`, `get_rate`, `put_latency`; `list_regions` entry counts growing |
-| `burst` | ~3000 ops/s, same mix | `find_stat_threshold_crossings` on `put_rate` finds the spike |
-| `hot-key` | 500 ops/s on just 5 keys in Customers | `put_rate` lopsided across servers: the hot keys' buckets have one primary each |
 | `heap-hog` | new 512 KB values into **Sessions** (no redundancy) until servers reach **critical heap** (90% of 768 MB) and start **rejecting puts** | `assess_cluster_health` heap checks go WARNING/CRITICAL; `search_logs` with `signal: heap_pressure`; the `heap_critical_events` signal |
 | `release-heap` | removes everything from Sessions, then back to `steady` | heap recovers; `heap_safe_events` |
 | `stop` | no traffic | flat lines |
+
+Traffic spikes and hot keys used to be scenarios here (`burst`, `hot-key`). Since chunk 11 they're timed k6 tests instead (`make select-load-test T=spike` / `T=hot-key`): see [docs/11](11-load-testing.md). `make load` keeps what k6 can't do well: always-on background traffic and GemFire-specific heap tricks.
 
 The app keeps running when servers reject puts. `/status` counts them under `rejectedAtCriticalHeap`, and the app logs a warning every 50 rejections.
 
@@ -40,11 +41,12 @@ workload/
 - **No client statistics archive, on purpose.** A client `.gfs` in `./data/gemfire` would be shipped by the forwarder like a member's, and `assess_cluster_health`'s `members_present` check would flag "a member recorded stats but isn't in the cluster now".
 - **Artifactory credentials** come from `.env` as **BuildKit secrets** (`secrets:` in `compose.yaml`, `RUN --mount=type=secret` in the Dockerfile): available to the Gradle step, never stored in an image layer.
 - **Port 18090** on your laptop, because gemfire-runner's `goodbye-world` already uses 8090.
-- `/actuator/prometheus` is exposed for chunk 8 (observability).
+- `/actuator/prometheus` is exposed for chunk 8 (observability). Since chunk 11 it also has `workload_op_seconds`: every GemFire call timed by the client (p95/p99), tagged `source=background|k6`.
+- **Chunk 11 adds `/ops/get` and `/ops/put`** (one real GemFire operation per HTTP request) so k6 can drive timed load tests: see [docs/11](11-load-testing.md).
 
 ## Bugs and noise we hit
 
-1. **Burst stuck at exactly 640 ops/s**, with idle CPUs and thousands of "dropped" operations. Each 100 ms tick started its 300 operations in a tight loop, and the first 64 took every in-flight permit *before any had run*, so the ceiling was 64 × 10 = 640/s. Raising the cap to 1000 gave about 3000 ops/s with 0 dropped. A neat lesson: a **perfectly flat** number with idle CPUs points to an artificial limit, not a slow system.
+1. **Burst stuck at exactly 640 ops/s** (back when `burst` was a scenario here; it's the k6 `spike` test now), with idle CPUs and thousands of "dropped" operations. Each 100 ms tick started its 300 operations in a tight loop, and the first 64 took every in-flight permit *before any had run*, so the ceiling was 64 × 10 = 640/s. Raising the cap to 1000 gave about 3000 ops/s with 0 dropped. A neat lesson: a **perfectly flat** number with idle CPUs points to an artificial limit, not a slow system.
 2. **`/actuator/health` was DOWN.** The GemFire actuator's continuous-query health check needs the CQ module: `CqService is not available`. Adding `gemfire-cq` fixed it, as gemfire-runner's apps do.
 3. **Claude found a bug in *our* setup.** Asked about heap, it also reported "repeating client-connection `EOFException` warnings every 5 seconds… most likely health-check probes". It was right. The server healthcheck opened the cache-server port (`</dev/tcp/127.0.0.1/40404`) and hung up without speaking GemFire's protocol, so each server logged `failed accepting client connection java.io.EOFException` every 5 s: **1,036 lines** of noise in the very logs the MCP server searches. The healthcheck now asks the locator's REST API about the member instead (`GET /management/v1/members/<hostname>`; since chunk 6 it checks the cache server is `running`).
 4. **`ERROR … DEPRECATED: PoolFactory.setMinConnections / setMaxConnections`** three times at startup. Spring for GemFire calls pool methods that GemFire 10.3 deprecates, and GemFire reports that at ERROR level with a stack trace. Harmless, and not our code; we leave it visible rather than silence a GemFire logger.

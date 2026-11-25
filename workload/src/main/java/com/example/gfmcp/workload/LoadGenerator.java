@@ -1,5 +1,7 @@
 package com.example.gfmcp.workload;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -8,6 +10,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -32,7 +35,7 @@ import org.springframework.stereotype.Component;
  * Every 100 ms the scheduler starts (target ops/s / 10) operations on virtual threads. At most
  * MAX_IN_FLIGHT run at once; if the cluster is too slow to keep up, extra operations are counted as
  * "dropped" instead of piling up. The cap must be well above one tick's worth of operations (300
- * for burst), because a tick starts all of its operations before any of them has finished.
+ * at higher rates), because a tick starts all of its operations before any of them has finished.
  */
 @Component
 public class LoadGenerator {
@@ -41,8 +44,6 @@ public class LoadGenerator {
 
     public enum Scenario {
         STEADY("steady", 200, "about 200 ops/s, 70% gets / 30% puts, 1 KB values over 10k keys in Customers + Orders"),
-        BURST("burst", 3000, "about 3000 ops/s, same mix as steady: a traffic spike"),
-        HOT_KEY("hot-key", 500, "500 ops/s on just 5 keys in Customers: one bucket (and one server) does all the work"),
         HEAP_HOG("heap-hog", 40, "new 512 KB values into Sessions (no redundancy) until servers hit critical heap"),
         RELEASE_HEAP("release-heap", 0, "remove everything from Sessions, then go back to steady"),
         STOP("stop", 0, "no traffic");
@@ -90,8 +91,15 @@ public class LoadGenerator {
 
     private final String initialScenario;
 
-    public LoadGenerator(Regions regions, @Value("${workload.scenario:steady}") String initialScenario, MeterRegistry meters) {
+    private final OpTimers timers;
+    private ScheduledFuture<?> revert;      // pending switch back after a timed scenario (guarded by this)
+    private volatile Instant revertsAt;
+    private volatile Scenario revertTo;
+
+    public LoadGenerator(Regions regions, @Value("${workload.scenario:steady}") String initialScenario, MeterRegistry meters,
+                         OpTimers timers) {
         this.regions = regions;
+        this.timers = timers;
         this.initialScenario = initialScenario;
         registerMetrics(meters);
     }
@@ -136,7 +144,38 @@ public class LoadGenerator {
         log.info("Seeded 100 entries into /Products");
     }
 
+    /**
+     * Switch for a while, then go back to what was running before (make load P=stop D=2m).
+     * The two "Scenario: a -> b" log lines (start and revert) are what Grafana shows as annotations.
+     */
+    public synchronized void switchTo(Scenario next, Duration duration) {
+        Scenario previous = scenario.get();
+        if (previous == Scenario.RELEASE_HEAP) {
+            previous = Scenario.STEADY;   // release-heap ends in steady anyway
+        }
+        switchTo(next);
+        Scenario back = previous;
+        revertTo = back;
+        revertsAt = Instant.now().plus(duration);
+        log.info("Scenario {} runs for {}, then back to {}", next.id,
+                org.springframework.boot.convert.DurationStyle.SIMPLE.print(duration, java.time.temporal.ChronoUnit.SECONDS), back.id);
+        revert = ticker.schedule(() -> {
+            synchronized (this) {
+                revert = null;
+                revertsAt = null;
+                revertTo = null;
+                switchTo(back);
+            }
+        }, duration.toMillis(), TimeUnit.MILLISECONDS);
+    }
+
     public synchronized void switchTo(Scenario next) {
+        if (revert != null) {          // a new switch replaces a pending timed one
+            revert.cancel(false);
+            revert = null;
+            revertsAt = null;
+            revertTo = null;
+        }
         log.info("Scenario: {} -> {} ({})", scenario.get().id, next.id, next.description);
         note = "";
         if (next == Scenario.RELEASE_HEAP) {
@@ -170,26 +209,24 @@ public class LoadGenerator {
     private void operation(Scenario s) {
         ThreadLocalRandom r = ThreadLocalRandom.current();
         switch (s) {
-            case STEADY, BURST -> {
+            case STEADY -> {
                 var region = r.nextBoolean() ? regions.customers : regions.orders;
                 String key = "key-" + r.nextInt(KEYSPACE);
                 if (r.nextInt(10) < 7) {
-                    region.get(key);
+                    timers.time("get", region, "background", () -> region.get(key));
                     if (r.nextInt(10) == 0) {
-                        regions.products.get("product-" + r.nextInt(100));
+                        String product = "product-" + r.nextInt(100);
+                        timers.time("get", regions.products, "background", () -> regions.products.get(product));
                     }
                     gets.incrementAndGet();
                 } else {
-                    region.put(key, VALUE_1KB);
+                    timers.time("put", region, "background", () -> region.put(key, VALUE_1KB));
                     puts.incrementAndGet();
                 }
             }
-            case HOT_KEY -> {
-                regions.customers.put("hot-" + r.nextInt(5), VALUE_1KB);
-                puts.incrementAndGet();
-            }
             case HEAP_HOG -> {
-                regions.sessions.put("session-" + sessionKeys.incrementAndGet(), VALUE_512KB);
+                String session = "session-" + sessionKeys.incrementAndGet();
+                timers.time("put", regions.sessions, "background", () -> regions.sessions.put(session, VALUE_512KB));
                 puts.incrementAndGet();
             }
             default -> { }
@@ -232,7 +269,7 @@ public class LoadGenerator {
         lastError.set(e.getClass().getSimpleName() + ": " + rootMessage(e));
     }
 
-    private static boolean isLowMemory(Throwable e) {
+    static boolean isLowMemory(Throwable e) {
         for (Throwable t = e; t != null; t = t.getCause()) {
             if (t instanceof LowMemoryException) {
                 return true;
@@ -261,6 +298,12 @@ public class LoadGenerator {
         Scenario s = scenario.get();
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("scenario", s.id);
+        Instant until = revertsAt;
+        Scenario back = revertTo;
+        if (until != null && back != null) {
+            m.put("revertsAt", until.toString());
+            m.put("revertsTo", back.id);
+        }
         m.put("description", s.description);
         m.put("targetOpsPerSecond", s.opsPerSecond);
         m.put("actualOpsPerSecond", actualOpsPerSecond);

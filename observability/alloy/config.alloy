@@ -1,7 +1,8 @@
-// Chunk 8: Grafana Alloy collects logs and pushes them to Loki. Three sources:
+// Chunk 8: Grafana Alloy collects logs and pushes them to Loki. Four sources:
 //   1. stdout/stderr of every container in this compose project (MCP server audit log, forwarder stats, ...)
 //   2. the GemFire members' log FILES in ./data/gemfire (GemFire writes to files, not stdout)
 //   3. ./data/chaos.log from `make chaos` / `make heal` (chunk 6), used as Grafana annotations
+//   4. ./data/load.log from `make loadtest` (chunk 11), also annotations
 // See the pipeline live at http://localhost:12345 (each block below is a box in the graph).
 
 // ── 1. Container logs, via the Docker socket ─────────────────────────────────
@@ -87,6 +88,34 @@ loki.source.file "chaos" {
 
 loki.process "chaos" {
   // "2026-11-24T19:16:27Z  pause  server-2"
+  stage.regex {
+    expression = "^(?P<ts>\\S+)\\s+(?P<action>\\S+)"
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339"
+  }
+  stage.labels {
+    values = { action = "" }
+  }
+  stage.label_drop {
+    values = ["filename"]
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+// ── 4. The load-test log (chunk 11) ──────────────────────────────────────────
+// "2026-11-25T15:46:08Z  start  spike" / "...  end    spike  passed", written by make loadtest
+local.file_match "load" {
+  path_targets = [{ __path__ = "/lab-data/load.log", job = "load" }]
+}
+
+loki.source.file "load" {
+  targets    = local.file_match.load.targets
+  forward_to = [loki.process.load.receiver]
+}
+
+loki.process "load" {
   stage.regex {
     expression = "^(?P<ts>\\S+)\\s+(?P<action>\\S+)"
   }

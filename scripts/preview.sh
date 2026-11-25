@@ -3,6 +3,7 @@
 # Summary panels for the fzf menus in the Makefile (styling in scripts/ui.sh):
 #   scripts/preview.sh load <scenario>    make load: what the scenario does + what it's running now
 #   scripts/preview.sh logs <service>     make logs: container status + its last log lines
+#   scripts/preview.sh loadtest <name>    make select-load-test: the k6 script's header block
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,24 +23,6 @@ load_preview() {
       ui_section "Where to see it"
       ui_bullet "MCP: $(ui_cmd "query_stat") with $(ui_tags put_rate get_rate put_latency)"
       ui_bullet "Grafana: $(ui_bold "Puts / s per member"), $(ui_bold "Operations / s")"
-      ;;
-    burst)
-      ui_title warn BURST "a traffic spike"
-      ui_section "What it does"
-      ui_bullet "~3000 ops/s, same mix as steady (15× the baseline)"
-      ui_section "Where to see it"
-      ui_bullet "MCP: $(ui_cmd "find_stat_threshold_crossings") on $(ui_tags put_rate) finds the spike"
-      ui_bullet "Grafana: the jump in $(ui_bold "Puts / s per member")"
-      ui_line "$(ui_dim "Switch back with steady to get a clean start and end time.")"
-      ;;
-    hot-key)
-      ui_title warn HOT-KEY "all the traffic on 5 keys"
-      ui_section "What it does"
-      ui_bullet "500 puts/s on keys hot-0 … hot-4 in Customers"
-      ui_bullet "each key's bucket has one primary, so 1–2 servers do all the work"
-      ui_section "Where to see it"
-      ui_bullet "MCP: $(ui_cmd "query_stat") $(ui_tags put_rate) per server: lopsided"
-      ui_bullet "Grafana: uneven lines in $(ui_bold "Puts / s per member")"
       ;;
     heap-hog)
       ui_title warn HEAP-HOG "fill the servers' heap until they refuse puts"
@@ -81,6 +64,34 @@ load_preview() {
   fi
 }
 
+# make select-load-test: the header block of k6/<name>.js ("// @title", "// @risk", "// @what", "// @expect", "// @watch")
+loadtest_preview() {
+  local name=$1 f="k6/$1.js" title risk
+  [ -f "$f" ] || { ui_title danger "$name" "no such test"; return; }
+  title=$(sed -n 's|^// @title *||p' "$f" | head -1)
+  risk=$(sed -n 's|^// @risk *||p' "$f" | head -1)
+  ui_title "${risk:-safe}" "${title:-$name}" "k6/$name.js"
+  section_lines() {   # section_lines <tag> <label>
+    local lines
+    lines=$(sed -n "s|^// @$1 *||p" "$f")
+    [ -n "$lines" ] || return 0
+    ui_section "$2"
+    printf '%s\n' "$lines" | while IFS= read -r l; do ui_bullet "$l"; done
+  }
+  section_lines what "What it does"
+  section_lines expect "Expect"
+  section_lines watch "Where to see it"
+  local st
+  st=$(curl -fs -m 2 "$WORKLOAD/status" 2>/dev/null) || st=""
+  ui_blank
+  ui_field "Run" "$(ui_cmd "make select-load-test T=$name")"
+  if [ -n "$st" ]; then
+    ui_field "Background" "$(jq -r '.scenario' <<<"$st") $(ui_dim "(paused during the run, then restored)")"
+  else
+    ui_field "Background" "$(ui_dim "workload not running yet: it gets started first")"
+  fi
+}
+
 logs_preview() {
   local s=$1
   local dc=(docker compose --profile '*')
@@ -114,5 +125,6 @@ logs_preview() {
 case "${1:-}" in
   load) load_preview "$(ui_strip "${2:?scenario}")" ;;
   logs) logs_preview "$(ui_strip "${2:?service}")" ;;
-  *) echo "usage: $0 load <scenario> | logs <service>" >&2; exit 2 ;;
+  loadtest) loadtest_preview "$(ui_strip "${2:?test}")" ;;
+  *) echo "usage: $0 load <scenario> | logs <service> | loadtest <name>" >&2; exit 2 ;;
 esac

@@ -17,7 +17,7 @@ Both need **JDK 17+**. We'll wrap each one in our own small `eclipse-temurin:21-
 | MCP server / forwarder | 1.0.0 | released 2026-10-20 |
 | JDK for our images | 21 | any JDK 17+ works |
 
-Note: `~/dev/gemfire-runner` currently runs `10.2.3`, so in runner mode (chunk 12, optional) those three live metrics will be missing.
+Note: `~/dev/gemfire-runner` currently runs `10.2.3`, so in runner mode (chunk 13, optional) those three live metrics will be missing.
 
 ## Three ways in, one way out
 

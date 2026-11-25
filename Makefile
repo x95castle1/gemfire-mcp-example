@@ -7,10 +7,10 @@ COMPOSE := docker compose
 # --profile '*' = every profile, so stop/status/logs also see optional services
 ALL := $(COMPOSE) --profile '*'
 
-.PHONY: help start stop clean status logs tools call seaweed inspector load chaos heal grafana-ui sre
+.PHONY: help start stop clean status logs tools call seaweed inspector load chaos heal grafana-ui sre select-load-test
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / { printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 start: ## Start cluster + S3 store + telemetry forwarder + MCP server (:8085/mcp)
 	@[ -f .env ] || { cp .env.example .env; echo "Created .env from .env.example"; }
@@ -57,7 +57,7 @@ inspector: ## Open MCP Inspector (web UI), already connected to the GemFire MCP 
 	[ -n "$$url" ] || { echo "Inspector didn't print its URL yet: make logs S=inspector"; exit 1; }; \
 	echo "open $$url"; open "$$url"
 
-load: ## Drive GemFire traffic: pick a scenario (fzf), or make load P=burst
+load: ## Background traffic: pick a scenario (fzf), or make load P=heap-hog [D=2m: then back]
 	@curl -fs -o /dev/null http://localhost:18090/actuator/health || { \
 	  echo "Starting the workload app (first build downloads dependencies, ~1-3 min)..."; \
 	  echo "$(COMPOSE) --profile workload up -d --build --wait workload"; \
@@ -67,15 +67,16 @@ load: ## Drive GemFire traffic: pick a scenario (fzf), or make load P=burst
 	  p=$$( . scripts/ui.sh; \
 	    curl -fs http://localhost:18090/scenarios \
 	    | jq -r --arg grn "$$ui_grn" --arg yel "$$ui_yel" --arg d "$$ui_d" --arg r "$$ui_r" \
-	        'to_entries[] | (if (.key | test("burst|hot-key|heap-hog")) then $$yel else $$grn end) as $$c | "\($$c)\(.key)\($$r)\t\($$d)\(.value)\($$r)"' \
+	        'to_entries[] | (if (.key | test("heap-hog")) then $$yel else $$grn end) as $$c | "\($$c)\(.key)\($$r)\t\($$d)\(.value)\($$r)"' \
 	    | ui_fzf "make load" --height=70% --delimiter='\t' --with-nth=1 \
 	        --header "Workload scenario (now: $$(curl -fs http://localhost:18090/status | jq -r .scenario))" \
 	        --preview 'scripts/preview.sh load {1}' \
 	    | cut -f1) || exit 0; \
 	fi; \
 	[ -n "$$p" ] || exit 0; \
-	echo "curl -X POST http://localhost:18090/scenario/$$p"; \
-	curl -sS -X POST http://localhost:18090/scenario/$$p | jq .
+	url="http://localhost:18090/scenario/$$p"; [ -n "$(D)" ] && url="$$url?duration=$(D)"; \
+	echo "curl -X POST $$url"; \
+	curl -sS -X POST "$$url" | jq .
 
 chaos: ## Break something: pick a failure (fzf), or make chaos C=kill M=server-2
 	@if [ -z "$(C)" ]; then scripts/chaos.sh pick; else scripts/chaos.sh $(C) $(M); fi
@@ -90,3 +91,6 @@ grafana-ui: ## Start Prometheus + Loki + Alloy + Grafana and open the lab dashbo
 sre: ## Start the SRE assistant, our own MCP client (Claude or Qwen), and open it (:18080)
 	$(COMPOSE) --profile mcp --profile assistant up -d --build --wait sre-assistant
 	open http://localhost:18080
+
+select-load-test: ## Run a k6 load test: pick one (fzf), or make select-load-test T=spike [DURATION=30m] [TARGET=60000]
+	@if [ -z "$(T)" ]; then scripts/loadtest.sh pick; else scripts/loadtest.sh $(T); fi

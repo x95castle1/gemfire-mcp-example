@@ -29,7 +29,7 @@ GF_S3_SECRET_KEY: admin
 |---|---|
 | `seaweedfs` | One container: master + volume server + filer + S3 gateway. S3 on `:8333`, file browser on `:8888`. User `admin`/`admin` in `seaweedfs/s3.json` (lab only) |
 | `s3-init` | One-shot `aws` CLI: creates the `gemfire-telemetry` bucket if it's missing. The forwarder doesn't create buckets |
-| `/gfmcp` prefix | One prefix per cluster. The docs warn that two clusters sharing a location get their data mixed. Runner mode (chunk 12) can use `/runner` in the same bucket |
+| `/gfmcp` prefix | One prefix per cluster. The docs warn that two clusters sharing a location get their data mixed. Runner mode (chunk 13) can use `/runner` in the same bucket |
 
 Notes:
 - **Path-style is automatic.** Setting `GF_S3_ENDPOINT` makes both sides use `http://seaweedfs:8333/gemfire-telemetry/...` instead of `http://gemfire-telemetry.seaweedfs:8333/...`. Both log `path-style` at startup.
