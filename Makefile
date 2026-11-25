@@ -7,10 +7,10 @@ COMPOSE := docker compose
 # --profile '*' = every profile, so stop/status/logs also see optional services
 ALL := $(COMPOSE) --profile '*'
 
-.PHONY: help start stop clean status logs tools call seaweed inspector load chaos heal grafana sre
+.PHONY: help start stop clean status logs tools call seaweed inspector load chaos heal grafana-ui sre
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*## "} /^[a-z]+:.*## / { printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 start: ## Start cluster + S3 store + telemetry forwarder + MCP server (:8085/mcp)
 	@[ -f .env ] || { cp .env.example .env; echo "Created .env from .env.example"; }
@@ -83,7 +83,7 @@ chaos: ## Break something: pick a failure (fzf), or make chaos C=kill M=server-2
 heal: ## Undo all chaos: unpause, reconnect, start stopped members, wait for healthy
 	@scripts/chaos.sh heal
 
-grafana: ## Start Prometheus + Loki + Alloy + Grafana and open the lab dashboard (no login)
+grafana-ui: ## Start Prometheus + Loki + Alloy + Grafana and open the lab dashboard (no login)
 	$(COMPOSE) --profile observability up -d --wait prometheus loki alloy grafana
 	open http://localhost:13000/d/gfmcp-lab
 

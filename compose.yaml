@@ -422,7 +422,7 @@ services:
       retries: 20
     networks: [gfmcp]
 
-  # ── Chunk 8: observability (make grafana) ────────────────────────────────────
+  # ── Chunk 8: observability (make grafana-ui) ─────────────────────────────────
   # Metrics: Prometheus scrapes GemFire (:7070/metrics/), SeaweedFS, the workload.
   # Logs:    Alloy ships container stdout + GemFire's log files + data/chaos.log into Loki.
   # The MCP server and the forwarder have NO metrics endpoint: their numbers come from their log lines.
