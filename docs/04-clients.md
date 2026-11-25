@@ -53,6 +53,8 @@ claude mcp add --transport http --scope project gemfire http://localhost:8085/mc
 
 `--scope project` writes the server into `.mcp.json` in the repo, so anyone who clones it gets the same server. (`--scope user` would put it in your personal config instead.)
 
+**Since chunk 10**, `.mcp.json` doesn't hold a fixed header any more. It has `"headersHelper": "scripts/mcp-token.sh --headers"`, a command Claude Code runs on every connect. It prints Basic admin/admin with security off, and a fresh Keycloak token with it on. The URL is `${GF_MCP_PUBLIC_URL:-http://localhost:8085/mcp}` (https with security on: see [docs/10](10-security.md)). Changing `.mcp.json` means approving `gemfire` once more.
+
 **First run:** start `claude` in this folder. It asks whether to trust the project's MCP servers, because a repo could otherwise point your Claude at anything. Approve `gemfire` once. Check with:
 
 ```bash

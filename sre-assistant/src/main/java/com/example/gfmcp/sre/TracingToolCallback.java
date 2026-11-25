@@ -95,7 +95,7 @@ class TracingToolCallback implements ToolCallback {
     }
 
     private void report(int seq, String name, long ms, boolean ok, String result) {
-        toolLog.info("sre.tool model={} tool={} ms={} ok={} resultChars={}", model, name, ms, ok,
+        toolLog.info("sre.tool user={} model={} tool={} ms={} ok={} resultChars={}", investigation.user, model, name, ms, ok,
                 result == null ? 0 : result.length());
         // Prometheus: sre_tool_calls_seconds_count{model,tool,ok} (a count and a duration per tool)
         Timer.builder("sre.tool.calls").description("MCP tool calls made by the assistant")

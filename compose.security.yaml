@@ -1,0 +1,192 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Chunk 10: security, as ONE overlay on top of compose.yaml. Everything security changes is in this file.
+#
+# On:   add to .env      COMPOSE_FILE=compose.yaml:compose.security.yaml
+# Off:  remove the line
+# Then: make stop && make start      (never `make start` alone: every member must switch at the same time,
+#                                     and recreating them all at once loses quorum, see docs/06-failures.md)
+#
+# Compose merges this file into compose.yaml: environment keys are added or replaced, depends_on entries
+# are added, and a volume with the same target path (e.g. /security) replaces the one in compose.yaml.
+#
+# Three layers (docs/10-security.md):
+#   10a  GemFire SecurityManager: users + roles; the MCP server reads the cluster as a read-only user
+#   10b  OAuth 2.1 at the MCP front door (Keycloak), per-tool scopes (RBAC), people log in to the SRE app
+#   10c  TLS: a lab CA (./data/certs) for the MCP server, Keycloak and GemFire's HTTP service
+#
+# Lab passwords, all on purpose: people admin/admin (+ jeremy, andrew, robert / VMware1!), service
+# accounts use their name (mcp/mcp, ...), keystores "changeit".
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── 10c: the lab CA and certificates, made once into ./data/certs (rm -rf data/certs to redo) ─────
+  certs:
+    image: ${GEMFIRE_IMAGE:-gemfire/gemfire:10.3.4-jdk17}   # only for its JDK: keytool + javac
+    entrypoint: ["bash", "/scripts/make-certs.sh"]
+    volumes:
+      - ./security/certs:/scripts:ro
+      - ./security/gemfire-on:/security:ro   # Health.java
+      - ./data/certs:/certs
+    networks: [gfmcp]
+
+  # ── 10a + 10c: every member gets the SecurityManager, its users and the TLS settings ──────────────
+  # /security = security/gemfire-on (gfsecurity.properties + security.json). The HTTP service is https
+  # now, and the image has no curl/openssl, so the healthchecks run a tiny Java client (Health.class).
+  locator:
+    volumes:
+      - ./security/gemfire-on:/security:ro
+      - ./data/certs:/certs:ro
+    depends_on:
+      certs: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "bash", "-c", "java -Xmx24m -XX:TieredStopAtLevel=1 -cp /certs -Djavax.net.ssl.trustStore=/certs/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit Health https://locator:7070/management/v1/ping pong"]
+  server-1:
+    volumes:
+      - ./security/gemfire-on:/security:ro
+      - ./data/certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "java -Xmx24m -XX:TieredStopAtLevel=1 -cp /certs -Djavax.net.ssl.trustStore=/certs/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit Health https://locator:7070/management/v1/members/$$(hostname) '\"running\":true'"]
+  server-2:
+    volumes:
+      - ./security/gemfire-on:/security:ro
+      - ./data/certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "java -Xmx24m -XX:TieredStopAtLevel=1 -cp /certs -Djavax.net.ssl.trustStore=/certs/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit Health https://locator:7070/management/v1/members/$$(hostname) '\"running\":true'"]
+  server-3:
+    volumes:
+      - ./security/gemfire-on:/security:ro
+      - ./data/certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "java -Xmx24m -XX:TieredStopAtLevel=1 -cp /certs -Djavax.net.ssl.trustStore=/certs/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit Health https://locator:7070/management/v1/members/$$(hostname) '\"running\":true'"]
+
+  # ── The GemFire MCP server ──────────────────────────────────────────────────────────────────────
+  mcp-server:
+    environment:
+      # 10a: read the cluster as "mcp", a user that may only READ (security/gemfire-on/security.json)
+      GF_MCP_GEMFIRE_AUTH: username-password
+      GF_MCP_GEMFIRE_USERNAME: mcp
+      GF_MCP_GEMFIRE_PASSWORD: mcp
+      # 10c: over https, so the password is encrypted on the wire. (Without TLS, username-password needs
+      # GF_MCP_GEMFIRE_ALLOW_INSECURE_URL=true, and the server logs a WARN on every start.)
+      GF_MCP_GEMFIRE_URL: https://locator:7070
+      GF_MCP_GEMFIRE_TRUSTSTORE_PATH: /certs/truststore.p12
+      GF_MCP_GEMFIRE_TRUSTSTORE_PASSWORD: changeit
+
+      # 10b: the front door takes OAuth bearer tokens (JWTs) from Keycloak instead of admin/admin.
+      GF_MCP_AUTH_MODE: oauth
+      # Discovery (/.well-known/openid-configuration, then the signing keys) happens on the first token.
+      # https (10c): without it, GF_MCP_AUTH_OAUTH_ALLOW_INSECURE_ISSUER=true, because whoever can tamper
+      # with the key download can forge tokens this server accepts.
+      GF_MCP_AUTH_OAUTH_ISSUER_URI: https://keycloak.localhost:18180/realms/gfmcp
+      # A token must be FOR this server (aud claim): one Keycloak minted for another app is refused.
+      GF_MCP_AUTH_OAUTH_AUDIENCE: gemfire-mcp-server
+      # Who the audit log names: the person (or service account), not a UUID.
+      GF_MCP_AUTH_OAUTH_PRINCIPAL_CLAIM: preferred_username
+      # Per-tool scopes: every tool needs gemfire:read; security/mcp/application-security.yml adds
+      # search_logs -> gemfire:logs (a map key can't be an environment variable).
+      GF_MCP_AUTH_OAUTH_RBAC_ENABLED: "true"
+      SPRING_CONFIG_ADDITIONAL_LOCATION: file:/security-mcp/application-security.yml
+      # Back on: throttle AND audit failed logins (off in compose.yaml, see docs/08-observability.md).
+      GF_MCP_AUTH_FAILURE_LIMIT_ENABLED: "true"
+
+      # 10c: serve https itself, and refuse plaintext from anywhere but loopback.
+      SERVER_SSL_ENABLED: "true"
+      SERVER_SSL_KEY_STORE: /certs/lab.p12
+      SERVER_SSL_KEY_STORE_PASSWORD: changeit
+      SERVER_SSL_KEY_STORE_TYPE: PKCS12
+      # enforce-non-local trusts the connection's own address and scheme, so no proxy headers may change them
+      SERVER_FORWARD_HEADERS_STRATEGY: none
+      GF_MCP_TLS_ENFORCE_NON_LOCAL: "true"
+      # The OAuth settings have no truststore of their own: the whole JVM trusts the lab CA (plus the usual CAs)
+      JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/certs/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit
+    volumes:
+      - ./security/mcp:/security-mcp:ro
+      - ./data/certs:/certs:ro
+    depends_on:
+      keycloak: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-so", "/dev/null", "--cacert", "/certs/ca.pem", "https://localhost:8085/.well-known/oauth-protected-resource"]
+
+  # ── 10b: the identity provider ───────────────────────────────────────────────────────────────
+  # https://keycloak.localhost:18180  (admin console: admin / admin; realm "gfmcp")
+  # ONE name everywhere, so a token's issuer is the same for everyone who checks it:
+  #   - inside Docker, keycloak.localhost is this container's network alias
+  #   - on your Mac, Chrome and curl send every *.localhost name to 127.0.0.1 by themselves (RFC 6761),
+  #     and the port is the same (18180) inside and out
+  # No /etc/hosts edit needed. Users, clients and scopes: security/keycloak/gfmcp-realm.json.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    command: start-dev --import-realm --https-port=18180 --http-enabled=false
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # Fixed public URL: tokens say iss=https://keycloak.localhost:18180/realms/gfmcp, whoever asked
+      KC_HOSTNAME: https://keycloak.localhost:18180
+      # 10c: https with the lab key pair
+      KC_HTTPS_KEY_STORE_FILE: /certs/lab.p12
+      KC_HTTPS_KEY_STORE_PASSWORD: changeit
+      KC_HEALTH_ENABLED: "true"
+      # The management port (9000, health) stays plain http, so the healthcheck below needs no TLS
+      KC_HTTP_MANAGEMENT_SCHEME: http
+    volumes:
+      # Imported on the first start only (start-dev keeps its database in the container: a new
+      # container = a fresh import). Edit the file, then: docker compose up -d --force-recreate keycloak
+      - ./security/keycloak:/opt/keycloak/data/import:ro
+      - ./data/certs:/certs:ro
+    depends_on:
+      certs: { condition: service_completed_successfully }
+    ports:
+      - "18180:18180"
+    healthcheck:
+      # The image has no curl: bash /dev/tcp against the management port's readiness check
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 3s
+      start_period: 60s
+      retries: 30
+    networks:
+      gfmcp:
+        aliases: [keycloak.localhost]
+
+  # ── 10a: the GemFire client logs in as "workload": read and write on its 4 regions, nothing else ──
+  # (Its client/server traffic stays plaintext: TLS here covers HTTP only, see gfsecurity.properties.)
+  workload:
+    environment:
+      SPRING_DATA_GEMFIRE_SECURITY_USERNAME: workload
+      SPRING_DATA_GEMFIRE_SECURITY_PASSWORD: workload
+
+  # ── 10b: people log in to the SRE app (Keycloak); each question reaches MCP in the asker's name ──
+  # Profile "security" loads sre-assistant/src/main/resources/application-security.yml (login + token exchange).
+  sre-assistant:
+    environment:
+      SPRING_PROFILES_ACTIVE: security
+      GF_MCP_URL: https://mcp-server:8085
+      KEYCLOAK_ISSUER: https://keycloak.localhost:18180/realms/gfmcp
+      # 10c: trust the lab CA, and keep trusting the public CAs (api.anthropic.com)
+      JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/certs/truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit
+    volumes:
+      - ./data/certs:/certs:ro
+    depends_on:
+      keycloak: { condition: service_healthy }
+
+  # ── 10c: MCP Inspector over https (make inspector passes a fresh token) ───────────────────────────
+  inspector:
+    command:
+      - --web
+      - --transport
+      - http
+      - --server-url
+      - https://mcp-server:8085/mcp
+      - --header
+      - "Authorization: ${INSPECTOR_AUTH:-missing: run make inspector}"
+    environment:
+      NODE_EXTRA_CA_CERTS: /certs/ca.pem
+    volumes:
+      - ./data/certs:/certs:ro
+
+  # ── 10c: Prometheus scrapes GemFire over https (security/prometheus/scrape.d replaces the http job) ──
+  prometheus:
+    volumes:
+      - ./security/prometheus/scrape.d:/etc/prometheus/scrape.d:ro
+      - ./data/certs:/certs:ro

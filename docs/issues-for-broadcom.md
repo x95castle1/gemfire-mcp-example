@@ -13,6 +13,10 @@ Found between 2026-11-23 and 2026-11-24 while building this lab, mostly during c
 | 7 | GemFire 10.3.4 | `No host/bind address specified: Using localhost` logged at INFO twice on every Management REST request about a member: 47% of each server's log | Bug / noise | High: measured, and the workaround removed it |
 | 8 | GemFire 10.3.4 | A server's Prometheus `/metrics` endpoint only starts if the developer REST API is enabled too | Question / docs | High: confirmed in the code |
 | 9 | GemFire MCP Server 1.0.0 + forwarder 1.0.0 | No metrics endpoint on either component; the audit log has no MCP method/tool name; with the failed-login limit off, failed logins aren't audited at all | Enhancement | High (observed) |
+| 10 | GemFire MCP Server 1.0.0 | Per-tool scopes don't keep log content from a caller without `gemfire:logs`: `assess_cluster_health` (and the timeline tools) report what the logs say | Docs / enhancement | High: reproduced with RBAC on |
+| 11 | GemFire MCP Server 1.0.0 | Streamable HTTP sessions aren't bound to the principal that created them; no unauthenticated health endpoint, so probes count as failed logins | Enhancement | High (observed) |
+| 12 | GemFire 10.3.4 (gfsh) | `gfsh run --file` echoes `connect --password=…` in clear text in its command summary | Bug | High: every run |
+| 13 | GemFire 10.3.4 | After a locator's `security-manager` is removed, the cluster configuration keeps it: servers inherit it and fail to start | Question / docs | High: reproduced both ways |
 
 ## Environment
 
@@ -274,8 +278,76 @@ Two smaller notes from the same work:
 
 ---
 
+## 10. Per-tool scopes don't hide log content
+
+**Product:** GemFire MCP Server 1.0.0, OAuth mode with `gf-mcp.auth.oauth.rbac.enabled=true` and `tool-scopes: {search_logs: gemfire:logs}`.
+
+**What we did:** a user without `gemfire:logs` (Keycloak group `viewers`) asked our MCP client about errors in the logs.
+
+**What happened:**
+- `search_logs` was refused, correctly: `Access denied: tool 'search_logs' requires scope 'gemfire:logs'.`
+- The model then called `assess_cluster_health` (needs only `gemfire:read`). Its `membership_events` check returned log-derived facts: members "forced out of the cluster by the coordinator" at exact times, "3 partition lines were logged", a quorum loss.
+
+**Why it matters:** an operator who gives a group "read, but not logs" will assume log content is off limits. It's off limits only through one tool. `get_membership_timeline` and `collect_member_departure_evidence` are also built from logs.
+
+**Suggestion:**
+- Document which tools read from the log source, or ship a default `tool-scopes` that puts all of them behind the logs scope.
+- Alternatively, let `assess_cluster_health` drop or redact log-based checks when the caller lacks the logs scope.
+
+---
+
+## 11. Sessions aren't bound to a principal; no unauthenticated health endpoint
+
+**Product:** GemFire MCP Server 1.0.0, OAuth mode. Two enhancement requests.
+
+1. **Session binding.** We opened a Streamable HTTP session (`initialize`) with client A's token, then sent `tools/list` on that `Mcp-Session-Id` with client B's token. It succeeded (HTTP 200). Each request is still authenticated and scope-checked on its own token, so we saw no privilege escalation. But the MCP security best practices say servers should bind session IDs to user-specific information, so a stolen session ID can't be replayed under another identity's context. (Our own client relies on the current behaviour: it opens one session as itself and calls tools on behalf of each user. Binding would need a session per user.)
+2. **Health endpoint.** Every path except `/.well-known/oauth-protected-resource` requires authentication, `/actuator/health` included. A Docker or Kubernetes probe without credentials therefore produces an audited `auth_failure` on every probe (we saw one every 3 s, from 127.0.0.1). It also counts toward the 50-failures-per-5-minutes throttle for the probe's source address. We worked around it by probing the protected-resource metadata path. An explicit unauthenticated liveness/readiness endpoint would be cleaner.
+
+Related to #9.2: denied tool calls are the one audit event that does name the tool (`"outcome":"denied","tool":"search_logs","requiredScope":"gemfire:logs"`). Successful calls still don't.
+
+---
+
+## 12. `gfsh run --file` prints the connect password in clear text
+
+**Product:** GemFire 10.3.4 gfsh. Bug.
+
+A script with `connect --locator=locator[10334] --user=cluster --password=cluster`, run with `gfsh run --file=init.gfsh`:
+- the progress line masks it: `1. Executing - connect --locator=locator[10334] --user=cluster --password=********`
+- the summary at the end doesn't: `Command-1 : connect --locator=locator[10334] --user=cluster --password=cluster`
+
+The summary goes to stdout, so it ends up in CI logs and container logs.
+
+---
+
+## 13. Turning security off: the cluster configuration keeps the `security-manager`
+
+**Product:** GemFire 10.3.4 with cluster configuration (`enable-cluster-configuration=true` on the locator, `use-cluster-configuration=true` on servers). Question / docs.
+
+**What we did:**
+1. Ran the cluster with `security-manager=org.apache.geode.examples.security.ExampleSecurityManager` (plus `security.json` on the classpath) on every member.
+2. Stopped every member, then started them all again **without** any security properties and without `security.json`. The locator's `ConfigDiskDir` was kept.
+
+**What happened:**
+- The locator started unsecured (`/management/v1/ping` answered 200 without credentials).
+- Every server exited at startup:
+
+  ```
+  [info  ...] The security-manager configuration attribute can not be modified.
+  [error ...] org.apache.geode.security.AuthenticationFailedException: ExampleSecurityManager: unable to find json resource "security.json" as specified by [security-json].
+  [fatal ...] Server is shutting down due to an exception during startup
+  ```
+
+- Deleting `ConfigDiskDir_<locator>` (and recreating the regions) fixed it.
+
+**Questions:**
+- Is it intended that the cluster configuration keeps `security-manager` once the locator no longer has one? The result is an unsecured locator whose servers are told to be secured.
+- If it is, what's the supported way to remove security from a cluster without losing the rest of the cluster configuration? (`gfsh export/import cluster-configuration` with an edited `cluster.properties`?) The security docs could cover "disabling security".
+
+---
+
 ## Not Broadcom issues (for completeness)
 
 - **SeaweedFS 4.01** stored AWS SDK `aws-chunked` uploads with their framing still attached, so the MCP server read them as "Not in GZIP format". Fixed in SeaweedFS 4.55.
 - **Our own setup:** a healthcheck that connected to the cache-server port and hung up made servers log an `EOFException` every 5 s (Claude found this, chunk 5). It was our probe, not a GemFire bug.
 - **Claude Code:** `--allowedTools` only pre-approves tools; it doesn't forbid the rest. For a blind test you also need `--disallowedTools`.
+- **Reactor Netty and `*.localhost` (chunk 10):** Netty's DNS resolver answers 127.0.0.1 for every `*.localhost` name (RFC 6761) without asking Docker's DNS. Spring's `RestClient.create()` and Spring Security's token client pick Reactor Netty when it's on the classpath (Spring AI brings it), so an issuer named `keycloak.localhost` was unreachable from the SRE app. We used the JDK HTTP client instead.

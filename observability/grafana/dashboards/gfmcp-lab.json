@@ -119,7 +119,7 @@
   "panels": [
     {
       "type": "row",
-      "title": "GemFire cluster  (Prometheus \u2190 each member's :7070/metrics/)",
+      "title": "GemFire cluster  (Prometheus ← each member's :7070/metrics/)",
       "id": 1,
       "collapsed": false,
       "gridPos": {
@@ -646,7 +646,7 @@
     },
     {
       "type": "row",
-      "title": "Workload  (Prometheus \u2190 workload:8090/actuator/prometheus)",
+      "title": "Workload  (Prometheus ← workload:8090/actuator/prometheus)",
       "id": 11,
       "collapsed": false,
       "gridPos": {
@@ -907,7 +907,7 @@
           "expr": "sum(rate(workload_op_seconds_count{source=\"k6\"}[1m]))",
           "range": true,
           "instant": false,
-          "legendFormat": "workload \u2192 GemFire calls (source=k6)"
+          "legendFormat": "workload → GemFire calls (source=k6)"
         },
         {
           "refId": "C",
@@ -1194,7 +1194,7 @@
     },
     {
       "type": "row",
-      "title": "GemFire MCP server  (Loki \u2190 the gf-mcp.audit log: it has no metrics endpoint)",
+      "title": "GemFire MCP server  (Loki ← the gf-mcp.audit log: it has no metrics endpoint)",
       "id": 15,
       "collapsed": false,
       "gridPos": {
@@ -1309,7 +1309,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Requests / min by principal",
+      "title": "Requests / min by principal and outcome",
       "id": 18,
       "datasource": {
         "type": "loki",
@@ -1347,16 +1347,17 @@
       },
       "targets": [
         {
-          "expr": "sum by (principal) (count_over_time({service=\"mcp-server\"} |= \"gf-mcp.audit\" | regexp `(?P<audit>\\{.*\\})\\s*$` | line_format `{{.audit}}` | json principal [1m]))",
+          "expr": "sum by (principal, outcome) (count_over_time({service=\"mcp-server\"} |= \"gf-mcp.audit\" | regexp `(?P<audit>\\{.*\\})\\s*$` | line_format `{{.audit}}` | json principal, outcome | label_format principal=`{{ if .principal }}{{ .principal }}{{ else }}(no valid login){{ end }}` [1m]))",
           "queryType": "range",
-          "legendFormat": "{{principal}}",
+          "legendFormat": "{{principal}} · {{outcome}}",
           "refId": "A",
           "datasource": {
             "type": "loki",
             "uid": "loki"
           }
         }
-      ]
+      ],
+      "description": "Who called the MCP server, from the audit log. Security off: always admin (Basic). Security on (chunk 10): the person or service account named in the token (preferred_username), with outcome success, denied (a tool scope the token lacks, e.g. search_logs without gemfire:logs) or auth_failure (no or a bad token: no principal)."
     },
     {
       "type": "logs",
@@ -1427,7 +1428,7 @@
     },
     {
       "type": "row",
-      "title": "Telemetry forwarder  (Loki \u2190 its 'plane=stats' log line, once a minute)",
+      "title": "Telemetry forwarder  (Loki ← its 'plane=stats' log line, once a minute)",
       "id": 21,
       "collapsed": false,
       "gridPos": {
@@ -1666,7 +1667,7 @@
     },
     {
       "type": "row",
-      "title": "SeaweedFS (S3 telemetry store)  (Prometheus \u2190 seaweedfs:9327)",
+      "title": "SeaweedFS (S3 telemetry store)  (Prometheus ← seaweedfs:9327)",
       "id": 26,
       "collapsed": false,
       "gridPos": {
@@ -1830,7 +1831,7 @@
     },
     {
       "type": "row",
-      "title": "GemFire member logs  (Loki \u2190 ./data/gemfire/*/*.log, the same files search_logs reads)",
+      "title": "GemFire member logs  (Loki ← ./data/gemfire/*/*.log, the same files search_logs reads)",
       "id": 30,
       "collapsed": false,
       "gridPos": {
@@ -1960,7 +1961,7 @@
     },
     {
       "type": "row",
-      "title": "SRE assistant  (chunk 9: our own MCP client; Prometheus \u2190 sre-assistant:8080/actuator/prometheus)",
+      "title": "SRE assistant  (chunk 9: our own MCP client; Prometheus ← sre-assistant:8080/actuator/prometheus)",
       "id": 34,
       "collapsed": false,
       "gridPos": {

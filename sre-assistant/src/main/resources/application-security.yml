@@ -1,0 +1,33 @@
+# Chunk 10b: loaded only with the "security" profile (SPRING_PROFILES_ACTIVE=security, set by
+# compose.security.yaml). People log in through Keycloak; questions reach the MCP server in THEIR name.
+gfmcp:
+  security:
+    enabled: true
+  oauth:
+    issuer: ${KEYCLOAK_ISSUER:http://keycloak.localhost:18180/realms/gfmcp}
+    token-uri: ${gfmcp.oauth.issuer}/protocol/openid-connect/token
+    client-id: sre-assistant
+    client-secret: ${SRE_ASSISTANT_CLIENT_SECRET:sre-assistant-secret}
+    # What the exchanged token is for, and the most it may carry. Keycloak grants a scope only if the
+    # user holds its role (security/keycloak/gfmcp-realm.json), so a viewer simply gets no gemfire:logs.
+    mcp-audience: gemfire-mcp-server
+    mcp-scopes: gemfire:read gemfire:logs
+
+spring:
+  security:
+    oauth2:
+      client:
+        # The login: authorization code + PKCE. Redirect URI: http://localhost:18080/login/oauth2/code/keycloak
+        registration:
+          keycloak:
+            client-id: ${gfmcp.oauth.client-id}
+            client-secret: ${gfmcp.oauth.client-secret}
+            authorization-grant-type: authorization_code
+            # Only who you are: the gemfire:* scopes are NOT in the login token (they come from the exchange)
+            scope: openid, profile
+        provider:
+          keycloak:
+            # Read at startup (/.well-known/openid-configuration). keycloak.localhost resolves inside
+            # Docker (a network alias) and in your browser (*.localhost is always 127.0.0.1).
+            issuer-uri: ${gfmcp.oauth.issuer}
+            user-name-attribute: preferred_username

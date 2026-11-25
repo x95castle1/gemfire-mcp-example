@@ -2,7 +2,8 @@
 # Regions are stored in the locator's cluster configuration, so restarted servers get them back.
 #
 # Each region is picked to make a specific MCP signal show up in later chunks:
-connect --locator=locator[10334]
+# (chunk 10) as user "cluster": needed once security is on, ignored while it's off
+connect --locator=locator[10334] --user=cluster --password=cluster
 
 # 1 redundant copy: killing one server -> get_partition_region_health shows DEGRADED (data still safe)
 create region --name=Customers --type=PARTITION_REDUNDANT --if-not-exists

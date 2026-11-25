@@ -2,10 +2,8 @@
   "mcpServers": {
     "gemfire": {
       "type": "http",
-      "url": "http://localhost:8085/mcp",
-      "headers": {
-        "Authorization": "Basic YWRtaW46YWRtaW4="
-      }
+      "url": "${GF_MCP_PUBLIC_URL:-http://localhost:8085/mcp}",
+      "headersHelper": "scripts/mcp-token.sh --headers"
     }
   }
 }

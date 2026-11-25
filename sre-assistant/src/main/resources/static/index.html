@@ -64,14 +64,19 @@
   .tag.rpc { color: var(--rpc); } .tag.tool { color: var(--tool); } .tag.res { color: var(--result); }
   .legend { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
   .empty { color: var(--muted); font-size: 13px; }
+  .who { margin-left: auto; font-size: 13px; color: var(--muted); }
+  .who b { color: inherit; } .who a { color: inherit; margin-left: 8px; }
+  .tag.auth { color: var(--tool); }
 </style>
 </head>
 <body>
 <header>
   <h1>GemFire SRE assistant</h1>
-  <span class="sub">our own MCP client · tools from the GemFire MCP server · chunk 9</span>
+  <span class="sub">our own MCP client · tools from the GemFire MCP server · chunks 9–10</span>
   <div class="models" id="models"></div>
+  <div class="who" id="who"></div>
 </header>
+<form id="logout" method="post" action="/logout" hidden><input type="hidden" name="_csrf" id="csrf"></form>
 <main>
   <section>
     <h2>Ask</h2>
@@ -173,6 +178,7 @@ function addEvent(ev) {
   const t = `<span class="t">+${(ev.ms / 1000).toFixed(1)}s</span>`;
   let html = "";
   switch (ev.type) {
+    case "token_exchange": html = `<details><summary>${t}<span class="tag auth">token exchange</span> MCP token for <b>${esc(ev.user)}</b> · scope <b>${esc(ev.scope)}</b></summary><pre>${esc(JSON.stringify(ev, null, 2))}</pre></details>`; break;
     case "question": html = `${t}<b>Question</b> to <b>${esc(ev.model)}</b> (${esc(ev.modelId)})`; break;
     case "tools": html = `${t}${ev.count} MCP tools offered to the model: <span class="t">${esc(ev.names.join(", "))}</span>`; break;
     case "tool_call": html = `<details open><summary>${t}<span class="tag tool">tool_call #${ev.seq}</span> <b>${esc(ev.tool)}</b></summary><pre>${esc(pretty(ev.arguments))}</pre></details>`; break;
@@ -209,7 +215,7 @@ async function ask() {
   document.querySelectorAll(".trace .ev:not(#session):not(#toolsdef)").forEach(e => e.remove());
   started = Date.now(); calls = 0; liveStats(); clearInterval(timer); timer = setInterval(() => liveStats(), 1000);
   try {
-    const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, model: selected() }) });
+    const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json", ...csrfHeader() }, body: JSON.stringify({ question, model: selected() }) });
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
     for (;;) {
       const { value, done } = await reader.read();
@@ -230,6 +236,17 @@ async function ask() {
 }
 $("ask").onclick = ask;
 $("q").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) ask(); });
+// Chunk 10b: with security on, Spring Security wants its CSRF token back on every POST. It's in the
+// XSRF-TOKEN cookie; send it as the X-XSRF-TOKEN header (or the _csrf form field for logout).
+function csrfToken() { const m = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]*)/); return m ? decodeURIComponent(m[1]) : ""; }
+function csrfHeader() { const t = csrfToken(); return t ? { "X-XSRF-TOKEN": t } : {}; }
+async function loadMe() {
+  const me = await (await fetch("/api/me")).json();
+  if (!me.security) { $("who").innerHTML = `security off · <span title="Add compose.security.yaml to COMPOSE_FILE in .env (chunk 10)">no login</span>`; return; }
+  $("who").innerHTML = `signed in as <b>${esc(me.user)}</b> · questions reach the MCP server in your name<a href="#" id="signout">sign out</a>`;
+  $("signout").onclick = (e) => { e.preventDefault(); $("csrf").value = csrfToken(); $("logout").submit(); };
+}
+loadMe();
 async function loadTools() {
   const defs = await (await fetch("/api/tools")).json();
   $("tools-body").innerHTML = defs.map(d => `<details><summary><b>${esc(d.name)}</b> <span class="t">${esc((d.description || "").split("\n")[0].slice(0, 120))}</span></summary><pre>${esc(d.description)}\n\ninput schema:\n${esc(pretty(d.inputSchema))}</pre></details>`).join("");

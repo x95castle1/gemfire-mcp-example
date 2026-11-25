@@ -27,6 +27,9 @@ public class TraceHub {
         final SseEmitter emitter;
         final long startNanos = System.nanoTime();
         volatile int toolCalls;
+        // Chunk 10b: who asked, and the MCP token minted in their name (null: security off)
+        volatile String user = "anonymous";
+        volatile McpTokens.Exchanged mcpToken;
 
         Investigation(SseEmitter emitter) {
             this.emitter = emitter;

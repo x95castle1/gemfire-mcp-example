@@ -14,6 +14,7 @@ help: ## Show this help
 
 start: ## Start cluster + S3 store + telemetry forwarder + MCP server (:8085/mcp)
 	@[ -f .env ] || { cp .env.example .env; echo "Created .env from .env.example"; }
+	@scripts/security.sh guard   # chunk 10: security on or off? (resets GemFire's cluster config when it changed)
 	$(COMPOSE) up -d --wait locator server-1 server-2 server-3
 	$(COMPOSE) run --rm gemfire-init 2>&1 | awk '/^Command-/ {sub(/^Command-[0-9]+ *: */, ""); cmd=$$0} /^Status/ {print "  " $$NF "  " cmd}'
 	$(COMPOSE) --profile telemetry up -d --build telemetry-forwarder
@@ -42,14 +43,15 @@ logs: ## Follow logs: pick a container (fzf), or make logs S=mcp-server
 tools: ## List the MCP tools (raw JSON-RPC)
 	scripts/mcp-curl.sh tools
 
-call: ## Call a tool: menu (fzf), or make call T=list_members [A='{"role":"servers"}']
-	@if [ -z "$(T)" ]; then scripts/mcp-curl.sh pick; else scripts/mcp-curl.sh call $(T) '$(A)'; fi
+call: ## Call a tool: menu (fzf), or make call T=list_members [A='{"role":"servers"}'] [C=viewer]
+	@if [ -z "$(T)" ]; then MCP_CLIENT=$(C) scripts/mcp-curl.sh pick; else MCP_CLIENT=$(C) scripts/mcp-curl.sh call $(T) '$(A)'; fi
 
 seaweed: ## Open the SeaweedFS file browser on the telemetry bucket
 	open http://localhost:8888/buckets/gemfire-telemetry/gfmcp/
 
 inspector: ## Open MCP Inspector (web UI), already connected to the GemFire MCP server
-	$(COMPOSE) --profile inspector up -d inspector
+	@# Recreated each time with fresh credentials: Basic admin/admin, or a 1-hour Keycloak token (chunk 10)
+	INSPECTOR_AUTH="$$(scripts/mcp-token.sh)" $(COMPOSE) --profile inspector up -d --force-recreate inspector
 	@# Inspector makes a new auth token on every start and prints the URL (with token) in its log
 	@url=""; for i in $$(seq 1 30); do \
 	  url=$$($(COMPOSE) --profile inspector logs --no-log-prefix inspector 2>/dev/null | grep -oE 'http://localhost:6274\?MCP_INSPECTOR_API_TOKEN=[0-9a-f]+' | tail -1); \

@@ -1,0 +1,12 @@
+# Chunk 10b: extra Spring Boot config for the GemFire MCP server, mounted by compose.security.yaml and
+# loaded with SPRING_CONFIG_ADDITIONAL_LOCATION (on top of the settings inside the JAR).
+#
+# Why a file and not an environment variable: a map KEY like "search_logs" can't be written as an
+# environment variable, because relaxed binding turns underscores into dots ("search.logs").
+gf-mcp:
+  auth:
+    oauth:
+      rbac:
+        # Every tool needs scope gemfire:read (fixed in the server). These need one more:
+        tool-scopes:
+          search_logs: gemfire:logs

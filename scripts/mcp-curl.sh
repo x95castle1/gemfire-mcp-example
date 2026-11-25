@@ -11,7 +11,8 @@
 #   scripts/mcp-curl.sh read <uri>                    # resources/read, e.g. gemfire://stat-signals
 #
 #   VERBOSE=1 scripts/mcp-curl.sh ...   also prints HTTP headers and raw response bodies
-#   MCP_URL=http://host:8085/mcp        target another server (default http://localhost:8085/mcp)
+#   MCP_URL=http://host:8085/mcp        target another server (default http://localhost:8085/mcp, https with security on)
+#   MCP_CLIENT=viewer                   security on (chunk 10): call as the read-only Keycloak client
 #
 # Every run is one complete MCP session:
 #   1. POST initialize                 -> server returns capabilities + an Mcp-Session-Id header
@@ -25,10 +26,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/ui.sh"
 [ -f "$ROOT/.env" ] && { set -a; . "$ROOT/.env"; set +a; }
 
-MCP_URL="${MCP_URL:-http://localhost:8085/mcp}"
+. "$ROOT/scripts/security.sh"
+
+MCP_URL="${MCP_URL:-$MCP_PUBLIC_URL}"   # https://... when security is on (chunk 10c)
 VERBOSE="${VERBOSE:-0}"
-: "${GF_MCP_AUTH_BASIC_USERNAME:?set in .env}" "${GF_MCP_AUTH_BASIC_PASSWORD:?set in .env}"
-AUTH="Basic $(printf '%s:%s' "$GF_MCP_AUTH_BASIC_USERNAME" "$GF_MCP_AUTH_BASIC_PASSWORD" | base64 | tr -d '\r\n')"
+# Basic admin/admin, or with security on (chunk 10) a Keycloak token: lab-cli, or MCP_CLIENT=viewer (read only)
+AUTH="$(mcp_auth "${MCP_CLIENT:-}")" || { echo "couldn't get a token from Keycloak: is it running? (make start)" >&2; exit 1; }
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 SESSION=""; PROTO=""
@@ -48,7 +51,7 @@ rpc() {
   [ -n "$PROTO" ]   && hdr+=(-H "MCP-Protocol-Version: $PROTO")
 
   local code
-  code=$(curl -sS -X POST "$MCP_URL" "${hdr[@]}" --data "$body" \
+  code=$(curl -sS ${SEC_CURL[@]+"${SEC_CURL[@]}"} -X POST "$MCP_URL" "${hdr[@]}" --data "$body" \
               -D "$TMP/headers" -o "$TMP/body" -w '%{http_code}')
   if [ "$VERBOSE" = 1 ]; then
     printf '%s' "$c_dim" >&2; tr -d '\r' <"$TMP/headers" >&2; cat "$TMP/body" >&2; printf '%s\n' "$c_off" >&2
@@ -99,7 +102,7 @@ close_session() {
   [ -z "$SESSION" ] && return
   step "4. DELETE /mcp  (end the session)"
   local code
-  code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$MCP_URL" \
+  code=$(curl -sS ${SEC_CURL[@]+"${SEC_CURL[@]}"} -o /dev/null -w '%{http_code}' -X DELETE "$MCP_URL" \
               -H "Authorization: $AUTH" -H "Mcp-Session-Id: $SESSION" -H "MCP-Protocol-Version: $PROTO")
   printf '%s← HTTP %s%s\n' "$c_in" "$code" "$c_off" >&2
 }

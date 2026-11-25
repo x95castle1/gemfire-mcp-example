@@ -32,6 +32,9 @@ dependencies {
     implementation 'org.springframework.ai:spring-ai-starter-model-ollama'
 
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    // Chunk 10b: people log in through Keycloak (OIDC). Active only with the "security" profile
+    // (compose.security.yaml); otherwise SecurityConfig leaves every page open, as before.
+    implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-client'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     runtimeOnly 'io.micrometer:micrometer-registry-prometheus'   // token/latency metrics for chunk 8's Grafana
 }

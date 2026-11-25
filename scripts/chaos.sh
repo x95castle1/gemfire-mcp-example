@@ -16,6 +16,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 . "$ROOT/scripts/ui.sh"
+. "$ROOT/scripts/security.sh"   # locator_get: the locator REST API, with credentials (chunk 10)
 
 NETWORK=gfmcp
 SERVERS="server-1 server-2 server-3"
@@ -167,7 +168,7 @@ server_info() {
     ui_blank
     ui_field "Docker" "$health $(ui_dim "(started $started UTC)")"
   fi
-  m=$(curl -fs -m 2 "http://localhost:17070/management/v1/members/$s" 2>/dev/null) || m=""
+  m=$(locator_get "/management/v1/members/$s" -m 2 2>/dev/null) || m=""
   if [ -n "$m" ]; then
     ui_field "GemFire" "$(jq -r '.result.groups[0].runtimeInfo[0] | "\(.status), \(.clientCount) clients, heap \(.heapUsage) MB"' <<<"$m")"
     ui_field "Regions" "$(jq -r '.result.groups[0].runtimeInfo[0].hostedRegions | join(", ")' <<<"$m")"
@@ -283,14 +284,14 @@ heal() {
 # A server is back when the locator lists it with its cache server running (same test as its
 # healthcheck in compose.yaml). A member forced out of the cluster (pause, isolate) reconnects by
 # itself, but only after max-wait-time-reconnect (60s); one that gives up exits, so restart it.
-server_ready() { curl -fs "http://localhost:17070/management/v1/members/$1" 2>/dev/null | grep -q '"running":true'; }
+server_ready() { locator_get "/management/v1/members/$1" 2>/dev/null | grep -q '"running":true'; }
 
 wait_for_servers() {
   local s waiting start=$SECONDS restarted_locator=""
   printf '%sWaiting for the locator to list every server as back (a forced-out member waits 60s before reconnecting)...%s\n' "$c_dim" "$c_off"
   while :; do
     waiting=""
-    if ! curl -fs http://localhost:17070/management/v1/ping 2>/dev/null | grep -q pong; then
+    if ! locator_get /management/v1/ping 2>/dev/null | grep -q pong; then
       waiting=" locator"
       # After a lost quorum (kill-majority) the locator forces itself out, then waits for a quorum
       # of the OLD members before it accepts anyone. They're dead, and new servers can't join it in

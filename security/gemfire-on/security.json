@@ -1,0 +1,29 @@
+{
+  "_comment": "Chunk 10a: read by ExampleSecurityManager (see gfsecurity.properties). A permission is RESOURCE:OPERATION[:REGION]: CLUSTER or DATA; READ, WRITE or MANAGE. MANAGE does not include READ. 'regions' narrows a role's DATA permissions to those regions.",
+  "roles": [
+    {
+      "name": "everything",
+      "operationsAllowed": ["CLUSTER:MANAGE", "CLUSTER:WRITE", "CLUSTER:READ", "DATA:MANAGE", "DATA:WRITE", "DATA:READ"]
+    },
+    {
+      "name": "member",
+      "operationsAllowed": ["CLUSTER:MANAGE", "CLUSTER:WRITE", "CLUSTER:READ", "DATA:MANAGE"]
+    },
+    {
+      "name": "cluster-reader",
+      "operationsAllowed": ["CLUSTER:READ"]
+    },
+    {
+      "name": "workload-data",
+      "operationsAllowed": ["DATA:READ", "DATA:WRITE"],
+      "regions": ["Customers", "Orders", "Sessions", "Products"]
+    }
+  ],
+  "users": [
+    { "name": "admin",    "password": "admin",    "roles": ["everything"] },
+    { "name": "cluster",  "password": "cluster",  "roles": ["member"] },
+    { "name": "mcp",      "password": "mcp",      "roles": ["cluster-reader"] },
+    { "name": "monitor",  "password": "monitor",  "roles": ["cluster-reader"] },
+    { "name": "workload", "password": "workload", "roles": ["workload-data"] }
+  ]
+}

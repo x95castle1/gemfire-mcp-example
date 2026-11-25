@@ -26,6 +26,11 @@ name: gfmcp
 #                                     localhost" being logged twice on every Management REST call about the member.
 #   --start-rest-api=true             (chunk 8) GemFire only starts a SERVER's /metrics endpoint when its developer
 #                                     REST API (/gemfire-api) is on too (found in GemFireCacheImpl.startMetricsApi).
+#   --security-properties-file        (chunk 10) /security is ./security/gemfire-off (an empty file: no security) unless
+#   --classpath=/security             compose.security.yaml mounts ./security/gemfire-on there (SecurityManager + users).
+#                                     The classpath is how the SecurityManager finds its security.json.
+#   healthchecks' Authorization       (chunk 10) "monitor:monitor", a read-only user. GemFire ignores the header while
+#                                     security is off, so the same check works in both modes.
 
 services:
 
@@ -36,6 +41,7 @@ services:
     volumes:
       - ./data/gemfire:/var/gemfire
       - ./gemfire:/config:ro
+      - ./security/gemfire-off:/security:ro   # chunk 10: compose.security.yaml mounts gemfire-on here instead
     networks: [gfmcp]
     hostname: locator
     working_dir: /var/gemfire/locator
@@ -46,6 +52,8 @@ services:
         --port=10334
         --hostname-for-clients=locator
         --properties-file=/config/gemfire.properties
+        --security-properties-file=/security/gfsecurity.properties
+        --classpath=/security
         --J=-Dgemfire.statistic-archive-file=locator.gfs
         --initial-heap=512m --max-heap=512m
         --J=-XX:-UseZGC --J=-XX:+UseG1GC
@@ -62,7 +70,7 @@ services:
     healthcheck:
       # The same check the MCP docs use: GET /management/v1/ping -> "pong" (bash /dev/tcp; the image has no curl).
       # To "locator", not 127.0.0.1: with --http-service-bind-address the HTTP service no longer listens on loopback.
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/ping HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' >&3 && grep -q pong <&3"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/ping HTTP/1.0\\r\\nHost: locator\\r\\nAuthorization: Basic bW9uaXRvcjptb25pdG9y\\r\\n\\r\\n' >&3 && grep -q pong <&3"]
       interval: 5s
       timeout: 3s
       start_period: 60s
@@ -75,6 +83,7 @@ services:
     volumes:
       - ./data/gemfire:/var/gemfire
       - ./gemfire:/config:ro
+      - ./security/gemfire-off:/security:ro   # chunk 10: compose.security.yaml mounts gemfire-on here instead
     networks: [gfmcp]
     # No auto-restart: chaos scripts (chunk 6) kill servers on purpose and we want them to stay dead
     restart: "no"
@@ -88,7 +97,7 @@ services:
       # Not a raw connect to the cache-server port 40404: a probe that opens it and hangs up without
       # speaking GemFire's protocol makes the server log "failed accepting client connection
       # java.io.EOFException" every 5s, noise that ends up in the logs the MCP server searches.
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"running\":true' <&3"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\nAuthorization: Basic bW9uaXRvcjptb25pdG9y\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"running\":true' <&3"]
       interval: 5s
       timeout: 3s
       start_period: 60s
@@ -102,6 +111,8 @@ services:
         --server-port=40404
         --hostname-for-clients=server-1
         --properties-file=/config/gemfire.properties
+        --security-properties-file=/security/gfsecurity.properties
+        --classpath=/security
         --J=-Dgemfire.statistic-archive-file=server-1.gfs
         --initial-heap=768m --max-heap=768m
         --J=-XX:-UseZGC --J=-XX:+UseG1GC
@@ -120,12 +131,13 @@ services:
     volumes:
       - ./data/gemfire:/var/gemfire
       - ./gemfire:/config:ro
+      - ./security/gemfire-off:/security:ro   # chunk 10: compose.security.yaml mounts gemfire-on here instead
     networks: [gfmcp]
     restart: "no"
     depends_on:
       locator: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"running\":true' <&3"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\nAuthorization: Basic bW9uaXRvcjptb25pdG9y\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"running\":true' <&3"]
       interval: 5s
       timeout: 3s
       start_period: 60s
@@ -139,6 +151,8 @@ services:
         --server-port=40404
         --hostname-for-clients=server-2
         --properties-file=/config/gemfire.properties
+        --security-properties-file=/security/gfsecurity.properties
+        --classpath=/security
         --J=-Dgemfire.statistic-archive-file=server-2.gfs
         --initial-heap=768m --max-heap=768m
         --J=-XX:-UseZGC --J=-XX:+UseG1GC
@@ -157,12 +171,13 @@ services:
     volumes:
       - ./data/gemfire:/var/gemfire
       - ./gemfire:/config:ro
+      - ./security/gemfire-off:/security:ro   # chunk 10: compose.security.yaml mounts gemfire-on here instead
     networks: [gfmcp]
     restart: "no"
     depends_on:
       locator: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"running\":true' <&3"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/locator/7070 && printf 'GET /management/v1/members/%s HTTP/1.0\\r\\nHost: locator\\r\\nAuthorization: Basic bW9uaXRvcjptb25pdG9y\\r\\n\\r\\n' \"$$(hostname)\" >&3 && grep -q '\"running\":true' <&3"]
       interval: 5s
       timeout: 3s
       start_period: 60s
@@ -176,6 +191,8 @@ services:
         --server-port=40404
         --hostname-for-clients=server-3
         --properties-file=/config/gemfire.properties
+        --security-properties-file=/security/gfsecurity.properties
+        --classpath=/security
         --J=-Dgemfire.statistic-archive-file=server-3.gfs
         --initial-heap=768m --max-heap=768m
         --J=-XX:-UseZGC --J=-XX:+UseG1GC
@@ -245,8 +262,10 @@ services:
     ports:
       - "8085:8085"
     healthcheck:
-      # Any HTTP answer (even 401 without credentials) means Tomcat is up and serving /mcp
-      test: ["CMD", "curl", "-so", "/dev/null", "http://127.0.0.1:8085/mcp"]
+      # Any HTTP answer means Tomcat is up. Not /mcp: with security on (chunk 10) every credential-less
+      # probe there is a failed login, audited as auth_failure and counted toward the 50-per-5-minutes
+      # throttle. This path answers without credentials (200 in OAuth mode) and isn't audited.
+      test: ["CMD", "curl", "-so", "/dev/null", "http://127.0.0.1:8085/.well-known/oauth-protected-resource"]
       interval: 3s
       timeout: 3s
       start_period: 30s
@@ -317,7 +336,7 @@ services:
 
   # ── Chunk 4: MCP Inspector, the official MCP debugging UI ─────────────────────
   # make inspector  ->  http://localhost:6274
-  # Started already pointed at our MCP server (with the admin/admin Basic header), so the
+  # Started already pointed at our MCP server (with the admin/admin Basic header, or a token), so the
   # Tools / Resources / History tabs work without typing anything into the UI.
   inspector:
     profiles: [inspector]
@@ -329,7 +348,8 @@ services:
       - --server-url
       - http://mcp-server:8085/mcp
       - --header
-      - "Authorization: Basic YWRtaW46YWRtaW4="
+      # make inspector passes the current credentials (chunk 10: a Keycloak token when security is on)
+      - "Authorization: ${INSPECTOR_AUTH:-Basic YWRtaW46YWRtaW4=}"
     environment:
       # No OS keychain in a container; say so explicitly instead of getting a warning at startup
       MCP_INSPECTOR_SECRET_STORE: memory
@@ -467,6 +487,7 @@ services:
       - --web.enable-remote-write-receiver   # chunk 11: k6 pushes its metrics here (it isn't scraped)
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/scrape.d:/etc/prometheus/scrape.d:ro   # chunk 10: the security overlay swaps this folder
       - ./data/prometheus:/prometheus
     # The image runs as "nobody"; root here so it can write to the bind-mounted ./data/prometheus
     user: root

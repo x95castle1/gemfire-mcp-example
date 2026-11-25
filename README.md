@@ -41,7 +41,7 @@ Note: even "is it healthy *now*?" (heap, GC, CPU, bucket redundancy) is judged f
 | 7 | S3 store (SeaweedFS) | swap the store without touching the cluster; browse it with `make seaweed` | [docs/07](docs/07-s3-store.md) |
 | 8 | Observability | `make grafana-ui`: Prometheus + Loki + Grafana for the whole lab: GemFire's built-in metrics, the workload, SeaweedFS, and the MCP server + forwarder from their logs (they have no metrics endpoint). Chaos runs show up as annotations | [docs/08](docs/08-observability.md) |
 | 9 | SRE assistant | `make sre`: our own MCP client (Spring AI) on :18080. Pick Claude or Qwen (local Ollama) per question and watch every tool call and JSON-RPC message live | [docs/09](docs/09-sre-assistant.md) |
-| 10 | Security (optional) | OAuth + RBAC, a secured cluster, TLS | |
+| 10 | Security (optional) | one switch in `.env` turns on: GemFire users and roles (the MCP server reads as a read-only user), OAuth at the MCP front door with Keycloak and per-tool scopes, a login on the SRE app that calls MCP in your name (token exchange), and TLS everywhere HTTP goes | [docs/10](docs/10-security.md) |
 | 11 | Load testing with k6 | `make select-load-test`: k6 runs timed tests (ramp, spike, soak, hot-key, breakpoint) through the workload's new `/ops/*` endpoints, with p95/p99, pass/fail thresholds, HTML reports and Grafana panels; `data/load.log` records each run for the AI | [docs/11](docs/11-load-testing.md) |
 | 12 | Any model, configured at runtime | the SRE assistant can use whatever model you want (any provider Spring AI supports, or any OpenAI-compatible endpoint), added and switched while it runs instead of being fixed at startup | |
 | 13 | Runner mode (optional) | point the MCP server at `~/dev/gemfire-runner` | |
@@ -62,6 +62,7 @@ make chaos                 # break something on purpose (fzf menu); make heal pu
 make select-load-test      # a timed k6 load test (fzf menu): spike, ramp, soak, hot-key, breakpoint
 make grafana-ui            # Prometheus + Loki + Grafana, opens the lab dashboard (:13000, no login)
 make sre                   # the SRE assistant, our own MCP client (needs ANTHROPIC_API_KEY in .env and/or Ollama)
+# security (chunk 10): add COMPOSE_FILE=compose.yaml:compose.security.yaml to .env, then make stop && make start
 claude                     # Claude Code in this folder picks up .mcp.json (approve 'gemfire' once)
 make stop                  # stop (keeps ./data)      make clean  # stop + wipe ./data
 ```
