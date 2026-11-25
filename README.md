@@ -42,7 +42,8 @@ Note: even "is it healthy *now*?" (heap, GC, CPU, bucket redundancy) is judged f
 | 8 | Observability | `make grafana-ui`: Prometheus + Loki + Grafana for the whole lab: GemFire's built-in metrics, the workload, SeaweedFS, and the MCP server + forwarder from their logs (they have no metrics endpoint). Chaos runs show up as annotations | [docs/08](docs/08-observability.md) |
 | 9 | SRE assistant | `make sre`: our own MCP client (Spring AI) on :18080. Pick Claude or Qwen (local Ollama) per question and watch every tool call and JSON-RPC message live | [docs/09](docs/09-sre-assistant.md) |
 | 10 | Security (optional) | OAuth + RBAC, a secured cluster, TLS | |
-| 11 | Runner mode (optional) | point the MCP server at `~/dev/gemfire-runner` | |
+| 11 | Load testing with k6 | k6 drives timed runs (ramps, spikes, soaks: p95/p99, pass/fail thresholds) through new HTTP endpoints on the workload, so GemFire still sees a real client; results in Grafana, with k6 start/end as ground truth for the AI. The switchable scenarios stay for always-on background load | |
+| 12 | Runner mode (optional) | point the MCP server at `~/dev/gemfire-runner` | |
 
 ## Quickstart
 

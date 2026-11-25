@@ -7,9 +7,9 @@
   "timezone": "utc",
   "schemaVersion": 41,
   "version": 1,
-  "refresh": "15s",
+  "refresh": "auto",
   "time": {
-    "from": "now-30m",
+    "from": "now-5m",
     "to": "now"
   },
   "editable": true,
