@@ -31,7 +31,9 @@ status: ## Show containers and health
 logs: ## Follow logs: pick a container (fzf), or make logs S=mcp-server
 	@s="$(S)"; \
 	if [ -z "$$s" ]; then \
-	  s=$$( { echo "(all)"; $(ALL) ps -a --services; } | fzf --height=40% --reverse --header "Follow logs for… (Ctrl-C to stop following)") || exit 0; \
+	  s=$$( . scripts/ui.sh; { echo "(all)"; $(ALL) ps -a --services; } \
+	    | ui_fzf "make logs" --height=70% --header "Follow logs for… (Ctrl-C to stop following)" \
+	        --preview 'scripts/preview.sh logs {1}') || exit 0; \
 	  [ "$$s" = "(all)" ] && s=""; \
 	fi; \
 	echo "$(ALL) logs -f --tail=50 $$s"; \
@@ -62,8 +64,13 @@ load: ## Drive GemFire traffic: pick a scenario (fzf), or make load P=burst
 	  $(COMPOSE) --profile workload up -d --build --wait workload || exit 1; }
 	@p="$(P)"; \
 	if [ -z "$$p" ]; then \
-	  p=$$(curl -fs http://localhost:18090/scenarios | jq -r 'to_entries[] | "\(.key)\t\(.value)"' \
-	    | fzf --height=40% --reverse --delimiter='\t' --with-nth=1,2 --header "Workload scenario (now: $$(curl -fs http://localhost:18090/status | jq -r .scenario))" \
+	  p=$$( . scripts/ui.sh; \
+	    curl -fs http://localhost:18090/scenarios \
+	    | jq -r --arg grn "$$ui_grn" --arg yel "$$ui_yel" --arg d "$$ui_d" --arg r "$$ui_r" \
+	        'to_entries[] | (if (.key | test("burst|hot-key|heap-hog")) then $$yel else $$grn end) as $$c | "\($$c)\(.key)\($$r)\t\($$d)\(.value)\($$r)"' \
+	    | ui_fzf "make load" --height=70% --delimiter='\t' --with-nth=1 \
+	        --header "Workload scenario (now: $$(curl -fs http://localhost:18090/status | jq -r .scenario))" \
+	        --preview 'scripts/preview.sh load {1}' \
 	    | cut -f1) || exit 0; \
 	fi; \
 	[ -n "$$p" ] || exit 0; \

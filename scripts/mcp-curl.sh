@@ -22,6 +22,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/ui.sh"
 [ -f "$ROOT/.env" ] && { set -a; . "$ROOT/.env"; set +a; }
 
 MCP_URL="${MCP_URL:-http://localhost:8085/mcp}"
@@ -120,19 +121,34 @@ show_tool_result() {
 # The difference is that here YOU are the model.
 
 # fzf preview of one tool: what the LLM reads when deciding whether and how to call it
+# Colours for the jq previews below (empty strings when NO_COLOR is set; see scripts/ui.sh)
+jq -n --arg b "$ui_b" --arg d "$ui_d" --arg r "$ui_r" --arg red "$ui_red" --arg yel "$ui_yel" --arg grn "$ui_grn" \
+      --arg mag "$ui_mag" --arg cyn "$ui_cyn" '$ARGS.named' >"$TMP/colors.json"
+
+# fzf preview of one tool: what the LLM reads when deciding whether and how to call it.
+# Heading green for a read-only tool (annotations.readOnlyHint), yellow otherwise.
 cat >"$TMP/preview.jq" <<'JQ'
+$c[0] as $c |
 .result.tools[] | select(.name == $n) |
-"\(.title // .name)\n\n\(.description)\n\nArguments (* = required):",
+(if (.annotations.readOnlyHint // false) then [$c.grn, "read-only"] else [$c.yel, "may change things"] end) as $risk |
+"\($c.b)\($risk[0])\(.name)\($c.r)  \($c.d)\(.title // "") · \($risk[1])\($c.r)",
+"",
+.description,
+"",
+"\($c.b)\($c.mag)Arguments\($c.r)  \($c.red)*\($c.r) = required",
 ( (.inputSchema.required // []) as $req | (.inputSchema.properties // {}) | to_entries[] | . as $e |
-  "  \(if ($req | index($e.key)) then "*" else " " end) \($e.key)  (\($e.value.type)\(if $e.value.items then " of \($e.value.items.type)" else "" end))" +
-  (if $e.value.enum then "\n      one of: \($e.value.enum | join(" | "))" else "" end) +
+  "  \(if ($req | index($e.key)) then "\($c.red)*\($c.r)" else " " end) \($c.b)\($e.key)\($c.r)  \($c.d)(\($e.value.type)\(if $e.value.items then " of \($e.value.items.type)" else "" end))\($c.r)" +
+  (if $e.value.enum then "\n      one of: " + ($e.value.enum | map("\($c.cyn)\(.)\($c.r)") | join("  ")) else "" end) +
   "\n      \($e.value.description // "")" )
 JQ
 
 # fzf preview of one argument
 cat >"$TMP/arg.jq" <<'JQ'
-.properties[$k] | "\(.type)\(if .items then " of \(.items.type)" else "" end)" +
-  (if .enum then "\n\none of: \(.enum | join(" | "))" else "" end) + "\n\n\(.description // "")"
+$c[0] as $c |
+.properties[$k] |
+"\($c.b)\($c.grn)\($k)\($c.r)  \($c.d)\(.type)\(if .items then " of \(.items.type)" else "" end)\($c.r)",
+(if .enum then "\n\($c.b)\($c.mag)One of\($c.r)\n  " + (.enum | map("\($c.cyn)\(.)\($c.r)") | join("  ")) else empty end),
+"\n\($c.b)\($c.mag)What it means\($c.r)\n\(.description // "")"
 JQ
 
 tty_read() {  # tty_read <prompt> -> prints what the user typed
@@ -154,17 +170,18 @@ build_args() {  # build_args <tool> -> prints the arguments JSON object
 
   chosen=""
   if [ -n "$optional" ]; then
-    chosen=$(printf '%s\n' "$optional" | fzf --multi --height=60% --reverse \
+    chosen=$(printf '%s\n' "$optional" | ui_fzf "make call $tool" --multi --height=60% \
       --header "Optional arguments for $tool: TAB to select, ENTER to continue (select none = server defaults)" \
-      --preview "jq -r --arg k {} -f '$TMP/arg.jq' '$TMP/schema.json'" \
-      --preview-window=right,60%,wrap) || true
+      --preview "jq -r --arg k {1} --slurpfile c '$TMP/colors.json' -f '$TMP/arg.jq' '$TMP/schema.json'") || true
   fi
 
   for key in $required $chosen; do
     type=$(jq -r --arg k "$key" '.properties[$k].type' <<<"$schema")
     enum=$(jq -r --arg k "$key" '.properties[$k].enum // [] | .[]' <<<"$schema")
     if [ -n "$enum" ]; then
-      val=$(printf '%s\n' "$enum" | fzf --height=40% --reverse --header "$key ($tool)") || true
+      val=$(printf '%s\n' "$enum" | ui_fzf "make call $tool" --height=50% --header "$key ($tool)" \
+            --bind="focus:transform-preview-label:echo ' $key = {1} '" \
+            --preview "jq -r --arg k '$key' --slurpfile c '$TMP/colors.json' -f '$TMP/arg.jq' '$TMP/schema.json'") || true
     elif [ "$key" = member_name ]; then
       # ENTER on no match uses what you typed: stats/log tools also accept members that have LEFT
       val=$(member_names | fzf --height=40% --reverse --bind 'enter:accept-or-print-query' \
@@ -209,11 +226,12 @@ case "$cmd" in
   pick)
     step "3. tools/list  (to build the menu)"
     request tools/list >"$TMP/tools.json"
-    tool=$(jq -r '.result.tools[] | "\(.name)\t\(.title // "")"' "$TMP/tools.json" \
-      | fzf --height=80% --reverse --delimiter=$'\t' --with-nth=1,2 \
+    # Only the title column is coloured: {1} (the tool name) must stay plain for the preview's jq lookup
+    tool=$(jq -r --arg d "$ui_d" --arg r "$ui_r" '.result.tools[] | "\(.name)\t\($d)\(.title // "")\($r)"' "$TMP/tools.json" \
+      | ui_fzf "make call" --height=80% --delimiter=$'\t' --with-nth=1,2 \
             --header "Pick a tool (the preview is what the AI model reads)" \
-            --preview "jq -r --arg n {1} -f '$TMP/preview.jq' '$TMP/tools.json'" \
-            --preview-window=right,65%,wrap | cut -f1) || true
+            --preview "jq -r --arg n {1} --slurpfile c '$TMP/colors.json' -f '$TMP/preview.jq' '$TMP/tools.json'" \
+            | cut -f1) || true
     if [ -n "$tool" ]; then
       args=$(build_args "$tool")
       step "3b. tools/call $tool"

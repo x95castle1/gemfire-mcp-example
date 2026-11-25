@@ -15,6 +15,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+. "$ROOT/scripts/ui.sh"
 
 NETWORK=gfmcp
 SERVERS="server-1 server-2 server-3"
@@ -47,90 +48,134 @@ require_running() {
 # ── What each failure is, and what to look for (also the fzf preview) ─────────
 describe() {
   case "$1" in
-    kill) cat <<'EOF'
-kill: a crash. docker compose kill sends SIGKILL: no shutdown, no goodbye.
-
-Expect:
-  - the other members log "<server> ... unexpectedly left the distributed cache"
-  - Customers + Orders: "Redundancy has dropped below 1 configured copies"
-    (and it stays down: GemFire doesn't re-create copies until the member returns)
-  - the workload sees a few errors, then carries on with 2 servers
-
-MCP signals: membership, redundancy
-EOF
-    ;;
-    stop) cat <<'EOF'
-stop: a clean shutdown. docker compose stop sends SIGTERM and GemFire closes the cache properly.
-
-Expect:
-  - "<server> ... gracefully left the distributed cache" (not "unexpectedly")
-  - the stopped server's own log ends with its shutdown messages
-  - redundancy drops, just like a crash
-
-Good test: can Claude tell a crash from a clean stop?
-MCP signals: membership, redundancy
-EOF
-    ;;
-    pause) cat <<'EOF'
-pause: a frozen JVM (think: a very long GC pause). docker compose pause freezes every process.
-
-Expect:
-  - after a few seconds the others say it "isn't responding to heartbeat requests"
-  - then it's removed from the cluster (a new membership view without it)
-  - the frozen server logs nothing, it's frozen. Its side of the story only appears
-    after 'make heal' unpauses it: a JVM pause warning, a forced disconnect, a reconnect
-
-MCP signals: membership, forced_disconnect, jvm_pause (after heal)
-EOF
-    ;;
-    isolate) cat <<'EOF'
-isolate: a network cut. docker network disconnect takes the server off the gfmcp network.
-The JVM stays awake but can't reach anyone: the opposite of pause.
-
-Expect:
-  - the others see it stop responding and remove it
-  - the isolated server notices by itself and logs it (possible network partition,
-    forced disconnect) and keeps trying to reconnect
-
-MCP signals: membership, partition, forced_disconnect
-EOF
-    ;;
-    locator-down) cat <<'EOF'
-locator-down: kill the locator (SIGKILL).
-
-The locator is also the MCP server's ONLY live source (Management REST on :7070).
-Expect:
-  - servers and workload traffic keep going: clients already know where the servers are
-  - LIVE MCP tools fail: list_members, list_regions
-  - HISTORY MCP tools still work: query_stat, search_logs (they read the S3 store)
-
-MCP signals: membership (the locator leaving)
-EOF
-    ;;
-    kill-majority) cat <<'EOF'
-kill-majority: SIGKILL 2 of the 3 servers at the same time.
-
-GemFire gives members weights (server 10, locator 3, +5 for the lead member). If a membership
-change loses half of the cluster's weight or more, the survivors suspect a network partition
-and may shut THEMSELVES down rather than risk two halves both acting as the cluster.
-Customers keeps 1 redundant copy, so losing 2 servers loses some of its data.
-
-Expect: partition / quorum warnings, "copies of some data have been lost", maybe a dead cluster.
-MCP signals: partition, membership, redundancy
-EOF
-    ;;
-    heal) cat <<'EOF'
-heal: undo all of the above.
-  1. unpause any paused member
-  2. reconnect any member taken off the network
-  3. start anything stopped, and wait until every member is healthy
-
-Expect: members rejoin, Orders (persistent) recovers from disk,
-"Redundancy ... copies has been restored".
-EOF
-    ;;
+    kill)
+      ui_title danger KILL "a crash: SIGKILL, no shutdown, no goodbye"
+      ui_section "What it does"
+      ui_line "$(ui_cmd "docker compose kill <server>")"
+      ui_section "Expect"
+      ui_bullet "the others log $(ui_log "…unexpectedly left the distributed cache")"
+      ui_line   "  $(ui_dim "within ~5s: member-timeout=5000")"
+      ui_bullet "Customers + Orders: $(ui_log "Redundancy has dropped below 2 configured copies")"
+      ui_line   "  $(ui_dim "and it stays down until the member comes back")"
+      ui_bullet "the workload retries on the other servers: ~0 errors"
+      ui_blank
+      ui_field "MCP signals" "$(ui_tags membership redundancy)"
+      ui_field "Undo" "$(ui_cmd "make heal")"
+      ;;
+    stop)
+      ui_title warn STOP "a clean shutdown: SIGTERM, GemFire closes the cache properly"
+      ui_section "What it does"
+      ui_line "$(ui_cmd "docker compose stop <server>")"
+      ui_section "Expect"
+      ui_bullet "$(ui_log "…gracefully left the distributed cache: shutdown message received")"
+      ui_line   "  $(ui_dim "noticed in ~0.3s, not ~5s like a crash")"
+      ui_bullet "the stopped server's own log ends with its shutdown sequence"
+      ui_bullet "redundancy drops, just like a crash"
+      ui_section "Good test"
+      ui_line "Can the AI tell a crash from a clean stop? (gracefully vs unexpectedly)"
+      ui_blank
+      ui_field "MCP signals" "$(ui_tags membership redundancy)"
+      ui_field "Undo" "$(ui_cmd "make heal")"
+      ;;
+    pause)
+      ui_title warn PAUSE "a frozen JVM, like a very long GC pause"
+      ui_section "What it does"
+      ui_line "$(ui_cmd "docker compose pause <server>")"
+      ui_section "Expect"
+      ui_bullet "after ~8s the others: $(ui_log "Member isn't responding to heartbeat requests")"
+      ui_bullet "after ~13s it's removed $(ui_dim "(a new membership view without it)")"
+      ui_bullet "the frozen server logs nothing: it's frozen"
+      ui_section "After make heal"
+      ui_bullet "$(ui_log "JVM pause with a wakeup delay of …ms"), then ForcedDisconnectException"
+      ui_bullet "it reconnects by itself after 60s $(ui_dim "(max-wait-time-reconnect)")"
+      ui_bullet "$(ui_dim "quirk: its status then stays \"starting\" for good")"
+      ui_blank
+      ui_field "MCP signals" "$(ui_tags membership forced_disconnect jvm_pause)"
+      ui_field "Undo" "$(ui_cmd "make heal") $(ui_dim "(waits ~60s for the reconnect)")"
+      ;;
+    isolate)
+      ui_title warn ISOLATE "a network cut: awake, but can't reach anyone"
+      ui_section "What it does"
+      ui_line "$(ui_cmd "docker network disconnect gfmcp <container>")"
+      ui_section "Expect"
+      ui_bullet "both sides suspect each other"
+      ui_bullet "the cut-off server works it out itself: $(ui_log "Quorum has been lost!")"
+      ui_line   "  $(ui_dim "it lost 28 of 38 weight units, so it removes itself")"
+      ui_bullet "$(ui_log "ForcedDisconnectException: Exiting due to possible network partition")"
+      ui_blank
+      ui_field "MCP signals" "$(ui_tags membership partition forced_disconnect)"
+      ui_field "Undo" "$(ui_cmd "make heal") $(ui_dim "(reconnects it; back in ~40s)")"
+      ;;
+    locator-down)
+      ui_title warn LOCATOR-DOWN "SIGKILL the locator, the MCP server's only LIVE source"
+      ui_section "What it does"
+      ui_line "$(ui_cmd "docker compose kill locator")"
+      ui_section "Expect"
+      ui_bullet "servers and workload traffic carry on $(ui_dim "(clients already know the servers)")"
+      ui_bullet "live tools fail: $(ui_bold list_members), $(ui_bold list_regions)"
+      ui_bullet "history tools still work: $(ui_bold query_stat), $(ui_bold search_logs)"
+      ui_bullet "assess_cluster_health: 8 of 9 checks UNKNOWN"
+      ui_line   "  $(ui_dim "afterwards the MCP server's circuit breaker waits up to 30s")"
+      ui_blank
+      ui_field "MCP signals" "$(ui_tags membership)"
+      ui_field "Undo" "$(ui_cmd "make heal")"
+      ;;
+    kill-majority)
+      ui_title danger KILL-MAJORITY "SIGKILL 2 of the 3 servers at once"
+      ui_section "What it does"
+      ui_line "$(ui_cmd "docker compose kill server-1 server-2")"
+      ui_section "Expect"
+      ui_bullet "the locator: $(ui_log "total weight lost … 25 of 38. Quorum has been lost!")"
+      ui_bullet "it declares a network partition and shuts the WHOLE cluster down"
+      ui_line   "  $(ui_dim "on purpose: two halves both acting as the cluster = split brain")"
+      ui_bullet "Customers + Products data lost; Orders comes back from disk"
+      ui_bullet "workload: 0 ops/s until heal"
+      ui_blank
+      ui_field "MCP signals" "$(ui_tags partition membership redundancy)"
+      ui_field "Undo" "$(ui_cmd "make heal") $(ui_dim "(restarts the deadlocked locator; ~2 min)")"
+      ;;
+    heal)
+      ui_title safe HEAL "undo all of the above"
+      ui_section "What it does"
+      ui_bullet "unpause any paused member"
+      ui_bullet "reconnect any member taken off the network"
+      ui_bullet "start anything stopped, then wait until the locator lists every server"
+      ui_bullet "restart the locator if it's stuck waiting for a lost quorum"
+      ui_section "Expect"
+      ui_bullet "members rejoin; Orders recovers from disk"
+      ui_bullet "$(ui_log "Configured redundancy of 2 copies has been restored")"
+      ui_blank
+      ui_field "MCP signals" "$(ui_tags redundancy membership)"
+      ;;
     *) die "unknown failure '$1' (kill, stop, pause, isolate, locator-down, kill-majority, heal)";;
   esac
+}
+
+# Summary panel for the server picker: what that server is doing right now
+server_info() {
+  local s=$1 st health started m
+  st=$(state "$s")
+  [ "$st" = running ] && ! on_network "$s" && st=isolated
+  case "$st" in
+    running) ui_title safe "$s" "running" ;;
+    missing) ui_title danger "$s" "no container" ;;
+    *)       ui_title warn "$s" "$st" ;;
+  esac
+  if [ "$st" != missing ]; then
+    health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' "$(cid "$s")")
+    started=$(docker inspect -f '{{.State.StartedAt}}' "$(cid "$s")" | cut -c1-19)
+    ui_blank
+    ui_field "Docker" "$health $(ui_dim "(started $started UTC)")"
+  fi
+  m=$(curl -fs -m 2 "http://localhost:17070/management/v1/members/$s" 2>/dev/null) || m=""
+  if [ -n "$m" ]; then
+    ui_field "GemFire" "$(jq -r '.result.groups[0].runtimeInfo[0] | "\(.status), \(.clientCount) clients, heap \(.heapUsage) MB"' <<<"$m")"
+    ui_field "Regions" "$(jq -r '.result.groups[0].runtimeInfo[0].hostedRegions | join(", ")' <<<"$m")"
+  else
+    ui_field "GemFire" "$(ui_dim "not listed by the locator right now")"
+  fi
+  ui_blank
+  ui_line "$(ui_dim "Only running servers can be broken; heal first otherwise.")"
 }
 
 # What to ask next: ready-to-run make call lines, using this action's timestamp
@@ -273,13 +318,16 @@ wait_for_servers() {
 pick() {
   command -v fzf >/dev/null || die "fzf not found (brew install fzf), or run: make chaos C=kill M=server-2"
   local what who
-  what=$(printf '%s\n' kill stop pause isolate locator-down kill-majority heal \
-    | fzf --height=60% --reverse --header "Break something (or heal). Current state: $(status_line)" \
-          --preview "$0 describe {}" --preview-window=right,65%,wrap) || exit 0
+  # The list is coloured by risk too (fzf --ansi strips the colours from what it returns)
+  what=$(printf '%s\n' "${ui_red}kill${ui_r}" "${ui_yel}stop${ui_r}" "${ui_yel}pause${ui_r}" "${ui_yel}isolate${ui_r}" \
+                        "${ui_yel}locator-down${ui_r}" "${ui_red}kill-majority${ui_r}" "${ui_grn}heal${ui_r}" \
+    | ui_fzf "make chaos" --height=70% --header "Break something (or heal). Now: $(status_line)" \
+          --preview "$0 describe {1}") || exit 0
   case "$what" in
     kill|stop|pause|isolate)
       who=$(for s in $SERVERS; do printf '%s\t%s\n' "$s" "$(state "$s")"; done \
-        | fzf --height=40% --reverse --delimiter='\t' --header "$what which server?" | cut -f1) || exit 0
+        | ui_fzf "make chaos $what" --height=50% --delimiter='\t' --header "$what which server?" \
+              --preview "$0 server-info {1}" | cut -f1) || exit 0
       one_server "$what" "$who" ;;
     locator-down)  locator_down ;;
     kill-majority) kill_majority ;;
@@ -299,7 +347,8 @@ status_line() {
 
 case "${1:-pick}" in
   pick)                    pick ;;
-  describe)                describe "${2:?describe what?}" ;;
+  describe)                describe "$(ui_strip "${2:?describe what?}")" ;;
+  server-info)             server_info "$(ui_strip "${2:?which server?}")" ;;
   kill|stop|pause|isolate) one_server "$1" "${2:-}" ;;
   locator-down)            locator_down ;;
   kill-majority)           kill_majority ;;
